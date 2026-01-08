@@ -1,0 +1,7 @@
+{
+  "name": "WhatsJhonTechAI - Gestão de Mensagens WhatsApp Business",
+  "description": "Plataforma profissional para gestão de envios em massa via API do WhatsApp Business, integrada com IA para geração de conteúdo e gestão de ativos (whatsapp_business_messaging, whatsapp_business_management).",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
