@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Link } from 'react-router-dom';
-import Layout from './components/Layout.tsx';
-import Dashboard from './pages/Dashboard.tsx';
-import NewCampaign from './pages/NewCampaign.tsx';
-import Settings from './pages/Settings.tsx';
-import Inbox from './pages/Inbox.tsx';
-import Automation from './pages/Automation.tsx';
-import { Contact, Campaign } from './types.ts';
+import Layout from './components/Layout';
+import Dashboard from './pages/Dashboard';
+import NewCampaign from './pages/NewCampaign';
+import Settings from './pages/Settings';
+import Inbox from './pages/Inbox';
+import Automation from './pages/Automation';
+import { Contact, Campaign } from './types';
 
 const Campaigns = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -273,7 +273,7 @@ const Contacts = () => {
       </div>
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-6 border border-slate-200 shadow-2xl">
+          <div className="bg-white rounded-2xl w-full max-sm p-6 border border-slate-200 shadow-2xl">
             <h3 className="text-lg font-bold text-slate-800 mb-4">Adicionar Manual</h3>
             <form onSubmit={(e) => {
               e.preventDefault();
