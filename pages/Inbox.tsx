@@ -33,22 +33,28 @@ const Inbox: React.FC = () => {
     return () => window.removeEventListener('storage', loadContacts);
   }, []);
 
-  // Salvar novo contato automaticamente (Lead Generation)
-  const autoSaveContact = (phone: string) => {
+  // Salvar novo contato automaticamente (Lead Generation) - AGORA FILTRADO POR NOME "cliente"
+  const autoSaveContact = (phone: string, profileName?: string) => {
+    // Regra solicitada: Salvar somente se o nome for "cliente"
+    if (!profileName || profileName.toLowerCase().trim() !== 'cliente') {
+      console.log(`[SISTEMA] Contato ${phone} (${profileName || 'Sem Nome'}) ignorado pela regra de captura.`);
+      return;
+    }
+
     const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
     const exists = contacts.find(c => c.phone === phone);
     
     if (!exists) {
       const newContact: Contact = {
         id: crypto.randomUUID(),
-        name: `Lead ${phone.slice(-4)}`,
+        name: `Lead Cliente ${phone.slice(-4)}`,
         phone: phone,
         group: 'Capturado via Chat'
       };
       const updated = [newContact, ...contacts];
       localStorage.setItem('wb_contacts', JSON.stringify(updated));
       setSavedContacts(updated);
-      console.log(`[SISTEMA] Novo lead capturado: ${phone}`);
+      console.log(`[SISTEMA] Novo lead "cliente" capturado: ${phone}`);
     }
   };
 
@@ -71,8 +77,8 @@ const Inbox: React.FC = () => {
     const processedIds = JSON.parse(localStorage.getItem('wb_processed_ids') || '[]');
     if (processedIds.includes(newMsg.id)) return;
 
-    // Captura automática de número ao processar mensagem
-    if (!newMsg.isMe) autoSaveContact(newMsg.from);
+    // Captura automática de número ao processar mensagem - Passando o nome para verificação
+    if (!newMsg.isMe) autoSaveContact(newMsg.from, newMsg.fromName);
 
     const autoSettingsRaw = localStorage.getItem('wb_automation_settings');
     if (!autoSettingsRaw) return;
@@ -153,6 +159,7 @@ const Inbox: React.FC = () => {
           return {
             id: stableId,
             from: m.from || m.de || 'Sistema',
+            fromName: m.name || m.fromName || m.pushName || undefined, // Tentando capturar o nome do perfil
             text: m.text || m.texto || 'Mensagem recebida',
             timestamp: m.timestamp || new Date().toISOString(),
             unread: m.unread !== undefined ? m.unread : true,
@@ -360,7 +367,7 @@ const Inbox: React.FC = () => {
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-12 text-center">
               <div className="w-24 h-24 bg-white/50 rounded-full flex items-center justify-center text-4xl mb-4 grayscale opacity-30 shadow-sm">🤖</div>
               <h3 className="font-bold text-slate-500 uppercase tracking-widest text-xs">Robô de Atendimento</h3>
-              <p className="text-[10px] mt-2 max-w-[200px]">As mensagens de novos contatos são salvas automaticamente como leads.</p>
+              <p className="text-[10px] mt-2 max-w-[200px]">Somente novos contatos identificados como "cliente" são salvos automaticamente.</p>
             </div>
           )}
         </div>

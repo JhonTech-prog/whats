@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Link } from 'react-router-dom';
-import Layout from './components/Layout';
-import Dashboard from './pages/Dashboard';
-import NewCampaign from './pages/NewCampaign';
-import Settings from './pages/Settings';
-import Inbox from './pages/Inbox';
-import Automation from './pages/Automation';
-import { Contact, Campaign } from './types';
+import Layout from './components/Layout.tsx';
+import Dashboard from './pages/Dashboard.tsx';
+import NewCampaign from './pages/NewCampaign.tsx';
+import Settings from './pages/Settings.tsx';
+import Inbox from './pages/Inbox.tsx';
+import Automation from './pages/Automation.tsx';
+import { Contact, Campaign } from './types.ts';
 
 const Campaigns = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
