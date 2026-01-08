@@ -120,7 +120,7 @@ const Settings: React.FC = () => {
           <p className="text-slate-400 italic">Se o botão "Teste" da Meta chega na sua caixa de entrada, mas o seu celular não, o problema é este:</p>
           <ol className="list-decimal list-inside space-y-3">
             <li className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-              <strong>Adicione seu número como Testador:</strong> No Painel da Meta > WhatsApp > <strong>Configuração da API</strong>, procure o campo "Para" e adicione o seu número pessoal. Você deve validar o código que chegará no seu WhatsApp.
+              <strong>Adicione seu número como Testador:</strong> No Painel da Meta &gt; WhatsApp &gt; <strong>Configuração da API</strong>, procure o campo "Para" e adicione o seu número pessoal. Você deve validar o código que chegará no seu WhatsApp.
             </li>
             <li className="p-3 bg-slate-800 rounded-xl border border-slate-700">
               <strong>Mande mensagem para o número de teste:</strong> Você deve enviar mensagem <strong>PARA</strong> o número que a Meta te deu (o +1 555...). Se mandar para o seu número real de chip, a Meta bloqueia o Webhook.
