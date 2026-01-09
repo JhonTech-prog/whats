@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { HashRouter, Routes, Route, Link } from 'react-router-dom';
+import { HashRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import NewCampaign from './pages/NewCampaign';
@@ -8,6 +8,27 @@ import Settings from './pages/Settings';
 import Inbox from './pages/Inbox';
 import Automation from './pages/Automation';
 import { Contact, Campaign } from './types';
+
+// Componente para forçar o Inbox no Mobile
+const MobileRedirectHandler: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const checkMobile = () => {
+      // Se largura for menor que 768px e não estiver no inbox, redireciona
+      if (window.innerWidth < 768 && location.pathname !== '/inbox') {
+        navigate('/inbox');
+      }
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, [location.pathname, navigate]);
+
+  return <>{children}</>;
+};
 
 const Campaigns = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -112,7 +133,7 @@ const Contacts = () => {
     const deduped = Array.from(uniqueMap.values());
     setContacts(deduped);
     localStorage.setItem('wb_contacts', JSON.stringify(deduped));
-    setSelectedIds(new Set()); // Limpa seleção após salvar/deletar
+    setSelectedIds(new Set());
     return deduped.length;
   };
 
@@ -368,17 +389,19 @@ const Contacts = () => {
 const App: React.FC = () => {
   return (
     <HashRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/inbox" element={<Inbox />} />
-          <Route path="/automation" element={<Automation />} />
-          <Route path="/campaigns" element={<Campaigns />} />
-          <Route path="/campaigns/new" element={<NewCampaign />} />
-          <Route path="/contacts" element={<Contacts />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
-      </Layout>
+      <MobileRedirectHandler>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/automation" element={<Automation />} />
+            <Route path="/campaigns" element={<Campaigns />} />
+            <Route path="/campaigns/new" element={<NewCampaign />} />
+            <Route path="/contacts" element={<Contacts />} />
+            <Route path="/settings" element={<Settings />} />
+          </Routes>
+        </Layout>
+      </MobileRedirectHandler>
     </HashRouter>
   );
 };

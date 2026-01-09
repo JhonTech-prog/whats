@@ -21,7 +21,6 @@ const Inbox: React.FC = () => {
     }
   }, [selectedChat, messages]);
 
-  // Carregar contatos para comparação
   const loadContacts = () => {
     const saved = localStorage.getItem('wb_contacts');
     if (saved) setSavedContacts(JSON.parse(saved));
@@ -33,9 +32,7 @@ const Inbox: React.FC = () => {
     return () => window.removeEventListener('storage', loadContacts);
   }, []);
 
-  // Salvar novo contato automaticamente (Lead Generation) - AGORA FILTRADO POR NOME "cliente"
   const autoSaveContact = (phone: string, profileName?: string) => {
-    // Regra solicitada: Salvar somente se o nome for "cliente"
     if (!profileName || profileName.toLowerCase().trim() !== 'cliente') {
       console.log(`[SISTEMA] Contato ${phone} (${profileName || 'Sem Nome'}) ignorado pela regra de captura.`);
       return;
@@ -77,7 +74,6 @@ const Inbox: React.FC = () => {
     const processedIds = JSON.parse(localStorage.getItem('wb_processed_ids') || '[]');
     if (processedIds.includes(newMsg.id)) return;
 
-    // Captura automática de número ao processar mensagem - Passando o nome para verificação
     if (!newMsg.isMe) autoSaveContact(newMsg.from, newMsg.fromName);
 
     const autoSettingsRaw = localStorage.getItem('wb_automation_settings');
@@ -159,7 +155,7 @@ const Inbox: React.FC = () => {
           return {
             id: stableId,
             from: m.from || m.de || 'Sistema',
-            fromName: m.name || m.fromName || m.pushName || undefined, // Tentando capturar o nome do perfil
+            fromName: m.name || m.fromName || m.pushName || undefined,
             text: m.text || m.texto || 'Mensagem recebida',
             timestamp: m.timestamp || new Date().toISOString(),
             unread: m.unread !== undefined ? m.unread : true,
@@ -262,7 +258,7 @@ const Inbox: React.FC = () => {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden h-[calc(100vh-200px)] flex flex-col">
+    <div className="bg-white rounded-none md:rounded-2xl border-0 md:border border-slate-200 shadow-sm overflow-hidden h-screen md:h-[calc(100vh-200px)] flex flex-col">
       <div className="px-4 py-3 bg-slate-900 flex justify-between items-center border-b border-slate-800">
         <div className="flex items-center gap-3">
           <div className={`w-2 h-2 rounded-full ${serverHealth === 'up' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
@@ -278,7 +274,8 @@ const Inbox: React.FC = () => {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-80 border-r border-slate-100 flex flex-col bg-white overflow-y-auto">
+        {/* Sidebar de Chats - Ocultar no mobile quando um chat estiver aberto para ganhar espaço */}
+        <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-slate-100 flex-col bg-white overflow-y-auto`}>
           {sortedChats.length === 0 ? (
             <div className="p-10 text-center opacity-20 mt-10">
               <p className="text-4xl mb-2">📩</p>
@@ -302,11 +299,14 @@ const Inbox: React.FC = () => {
           )}
         </div>
 
-        <div className="flex-1 flex flex-col bg-[#efeae2] relative shadow-inner">
+        {/* Área do Chat */}
+        <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#efeae2] relative shadow-inner`}>
           {selectedChat ? (
             <>
               <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center z-10 shadow-sm">
                 <div className="flex items-center gap-3">
+                  {/* Botão Voltar no Mobile */}
+                  <button onClick={() => setSelectedChat(null)} className="md:hidden text-slate-400 p-1">←</button>
                   <div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center font-bold text-[10px]">👤</div>
                   <div>
                     <p className="font-bold text-slate-800 text-sm">{getContactName(selectedChat)}</p>
@@ -314,7 +314,7 @@ const Inbox: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  <button onClick={exportChat} className="text-[9px] font-bold text-slate-400 hover:text-indigo-500 uppercase tracking-wider">Exportar TXT</button>
+                  <button onClick={exportChat} className="hidden sm:inline text-[9px] font-bold text-slate-400 hover:text-indigo-500 uppercase tracking-wider">Exportar</button>
                   <button onClick={() => {
                      if(confirm("Remover conversa local?")) {
                         const updated = messages.filter(m => m.from !== selectedChat);
@@ -326,7 +326,7 @@ const Inbox: React.FC = () => {
                 </div>
               </div>
 
-              <div ref={scrollRef} className="flex-1 p-6 overflow-y-auto space-y-3 flex flex-col">
+              <div ref={scrollRef} className="flex-1 p-4 md:p-6 overflow-y-auto space-y-3 flex flex-col">
                 {chatGroups[selectedChat].map((msg: any) => (
                   <div key={msg.id} className={`max-w-[85%] p-3 rounded-xl shadow-sm border text-sm ${
                     msg.isMe 
@@ -342,7 +342,7 @@ const Inbox: React.FC = () => {
                 ))}
               </div>
 
-              <div className="p-4 bg-white border-t border-slate-200">
+              <div className="p-4 bg-white border-t border-slate-200 pb-safe">
                 <div className="flex gap-2 items-end max-w-4xl mx-auto">
                   <textarea 
                     value={replyText}
@@ -353,7 +353,7 @@ const Inbox: React.FC = () => {
                         handleSendReply();
                       }
                     }}
-                    placeholder="Sua resposta manual..."
+                    placeholder="Sua resposta..."
                     rows={1}
                     className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none max-h-32 transition-all"
                   />
@@ -367,7 +367,7 @@ const Inbox: React.FC = () => {
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-12 text-center">
               <div className="w-24 h-24 bg-white/50 rounded-full flex items-center justify-center text-4xl mb-4 grayscale opacity-30 shadow-sm">🤖</div>
               <h3 className="font-bold text-slate-500 uppercase tracking-widest text-xs">Robô de Atendimento</h3>
-              <p className="text-[10px] mt-2 max-w-[200px]">Somente novos contatos identificados como "cliente" são salvos automaticamente.</p>
+              <p className="text-[10px] mt-2 max-w-[200px]">Selecione um chat para responder.</p>
             </div>
           )}
         </div>

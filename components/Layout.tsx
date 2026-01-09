@@ -46,7 +46,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      {/* Sidebar */}
+      {/* Sidebar - Oculta no mobile */}
       <aside className="w-64 bg-white border-r border-slate-200 fixed h-full z-10 hidden md:block">
         <div className="p-6">
           <div className="flex items-center gap-2 mb-8">
@@ -79,8 +79,10 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         </div>
       </aside>
 
-      <main className="flex-1 md:ml-64 p-4 md:p-8">
-        <header className="flex justify-between items-center mb-8">
+      {/* Ajuste de margem e padding: zero no mobile, com margem no desktop */}
+      <main className="flex-1 md:ml-64 p-0 md:p-8">
+        {/* Header - Oculto no mobile */}
+        <header className="hidden md:flex justify-between items-center mb-8 px-4 py-4 md:p-0 bg-white md:bg-transparent border-b md:border-0 border-slate-200">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">
               {navItems.find(item => item.path === location.pathname)?.name || 'Painel'}
