@@ -84,6 +84,7 @@ const Contacts = () => {
   const [newPhone, setNewPhone] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -91,12 +92,10 @@ const Contacts = () => {
     if (saved) setContacts(JSON.parse(saved));
   }, []);
 
-  // Verifica se o contato começa com "cliente"
   const isClientContact = (name: string): boolean => {
     return name.toLowerCase().trim().startsWith('cliente');
   };
 
-  // Formata para garantir o padrão "cliente nome"
   const formatContactName = (rawName: string): string => {
     if (!rawName) return 'cliente';
     const clean = rawName.replace(/^cliente\s+/i, '').trim();
@@ -113,6 +112,7 @@ const Contacts = () => {
     const deduped = Array.from(uniqueMap.values());
     setContacts(deduped);
     localStorage.setItem('wb_contacts', JSON.stringify(deduped));
+    setSelectedIds(new Set()); // Limpa seleção após salvar/deletar
     return deduped.length;
   };
 
@@ -125,6 +125,30 @@ const Contacts = () => {
     return digits;
   };
 
+  const toggleSelectAll = () => {
+    if (selectedIds.size === contacts.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(contacts.map(c => c.id)));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    const newSelection = new Set(selectedIds);
+    if (newSelection.has(id)) {
+      newSelection.delete(id);
+    } else {
+      newSelection.add(id);
+    }
+    setSelectedIds(newSelection);
+  };
+
+  const deleteSelected = () => {
+    if (!confirm(`Deseja remover ${selectedIds.size} contatos selecionados?`)) return;
+    const remaining = contacts.filter(c => !selectedIds.has(c.id));
+    saveContacts(remaining);
+  };
+
   const handleImportFromPhone = async () => {
     if (!('contacts' in navigator)) {
       alert("API de agenda não suportada neste navegador.");
@@ -135,7 +159,7 @@ const Contacts = () => {
       const results = await navigator.contacts.select(['name', 'tel'], { multiple: true });
       if (results?.length > 0) {
         const imported = results
-          .filter((res: any) => isClientContact(res.name?.[0] || '')) // FILTRO: Só quem começa com cliente
+          .filter((res: any) => isClientContact(res.name?.[0] || ''))
           .map((res: any) => ({
             id: crypto.randomUUID(),
             name: formatContactName(res.name?.[0]),
@@ -143,8 +167,8 @@ const Contacts = () => {
             group: 'Agenda Celular'
           })).filter((c: Contact) => c.phone.length >= 12);
         
-        const count = saveContacts([...imported, ...contacts]);
-        alert(`Processado! Foram importados ${imported.length} contatos que seguiam a regra 'cliente'.`);
+        saveContacts([...imported, ...contacts]);
+        alert(`Processado! Foram importados ${imported.length} contatos.`);
       }
     } catch (err) {
       console.error(err);
@@ -166,7 +190,7 @@ const Contacts = () => {
           const telMatch = card.match(/TEL.*:(.*)/);
           const rawName = nameMatch ? nameMatch[1].trim() : '';
           
-          if (telMatch && isClientContact(rawName)) { // FILTRO VCF
+          if (telMatch && isClientContact(rawName)) {
             newContacts.push({
               id: crypto.randomUUID(),
               name: formatContactName(rawName),
@@ -181,7 +205,7 @@ const Contacts = () => {
           const parts = line.split(/[,;]/);
           if (parts.length >= 2) {
             const rawName = parts[0].trim().replace(/"/g, '');
-            if (isClientContact(rawName)) { // FILTRO CSV
+            if (isClientContact(rawName)) {
               newContacts.push({
                 id: crypto.randomUUID(),
                 name: formatContactName(rawName),
@@ -195,7 +219,7 @@ const Contacts = () => {
       const validContacts = newContacts.filter(c => c.phone.length >= 12);
       saveContacts([...validContacts, ...contacts]);
       setIsProcessing(false);
-      alert(`${validContacts.length} contatos válidos (regra 'cliente') importados.`);
+      alert(`${validContacts.length} contatos importados.`);
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
     reader.readAsText(file);
@@ -246,9 +270,17 @@ const Contacts = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-800">Meus Contatos</h2>
-          <p className="text-sm text-slate-500">Apenas contatos começando com "cliente" são aceitos.</p>
+          <p className="text-sm text-slate-500">Regra: apenas contatos que iniciam com "cliente".</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {selectedIds.size > 0 && (
+            <button 
+              onClick={deleteSelected}
+              className="bg-rose-50 text-rose-600 px-4 py-2 rounded-lg text-xs font-bold border border-rose-100 hover:bg-rose-100 transition-all flex items-center gap-2"
+            >
+              <span>🗑️</span> Remover Selecionados ({selectedIds.size})
+            </button>
+          )}
           <input type="file" ref={fileInputRef} onChange={handleFileImport} accept=".vcf,.csv" className="hidden" />
           <button onClick={() => fileInputRef.current?.click()} className="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-xs font-bold border border-slate-200">📁 Arquivo</button>
           <button onClick={handleImportFromPhone} className="bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-lg shadow-indigo-100">📱 Agenda</button>
@@ -259,6 +291,14 @@ const Contacts = () => {
         <table className="w-full text-left">
           <thead>
             <tr className="border-b border-slate-100">
+              <th className="pb-4 w-10">
+                <input 
+                  type="checkbox" 
+                  className="rounded border-slate-300 text-emerald-500 focus:ring-emerald-500" 
+                  checked={contacts.length > 0 && selectedIds.size === contacts.length}
+                  onChange={toggleSelectAll}
+                />
+              </th>
               <th className="pb-4 text-xs font-bold text-slate-400 uppercase">Nome</th>
               <th className="pb-4 text-xs font-bold text-slate-400 uppercase">WhatsApp</th>
               <th className="pb-4 text-xs font-bold text-slate-400 uppercase text-right">Ação</th>
@@ -266,10 +306,18 @@ const Contacts = () => {
           </thead>
           <tbody className="divide-y divide-slate-50">
             {contacts.length === 0 ? (
-              <tr><td colSpan={3} className="py-20 text-center text-slate-400 italic">Nenhum contato que siga a regra de nome.</td></tr>
+              <tr><td colSpan={4} className="py-20 text-center text-slate-400 italic">Nenhum contato encontrado.</td></tr>
             ) : (
               contacts.map(c => (
-                <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
+                <tr key={c.id} className={`hover:bg-slate-50/80 transition-colors ${selectedIds.has(c.id) ? 'bg-emerald-50/30' : ''}`}>
+                  <td className="py-4">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-slate-300 text-emerald-500 focus:ring-emerald-500" 
+                      checked={selectedIds.has(c.id)}
+                      onChange={() => toggleSelect(c.id)}
+                    />
+                  </td>
                   <td className="py-4 text-sm font-semibold text-slate-700">{c.name}</td>
                   <td className="py-4 text-sm text-emerald-600 font-mono">+{c.phone}</td>
                   <td className="py-4 text-right">
@@ -294,12 +342,10 @@ const Contacts = () => {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-sm p-6 border border-slate-200 shadow-2xl">
             <h3 className="text-lg font-bold text-slate-800 mb-4">Adicionar Manual</h3>
-            <p className="text-[10px] text-slate-400 mb-4 uppercase font-bold italic">* O nome deve começar com "cliente"</p>
+            <p className="text-[10px] text-slate-400 mb-4 uppercase font-bold italic">* Nome deve começar com "cliente"</p>
             <form onSubmit={(e) => {
               e.preventDefault();
-              if (!isClientContact(newName)) {
-                return alert("Erro: O nome deve começar obrigatoriamente com a palavra 'cliente'.");
-              }
+              if (!isClientContact(newName)) return alert("O nome deve começar com 'cliente'.");
               const formatted = formatPhoneForAPI(newPhone);
               if (formatted.length < 12) return alert("Número inválido.");
               saveContacts([{ id: crypto.randomUUID(), name: formatContactName(newName), phone: formatted, group: 'Manual' }, ...contacts]);
