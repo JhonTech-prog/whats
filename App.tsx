@@ -91,6 +91,18 @@ const Contacts = () => {
     if (saved) setContacts(JSON.parse(saved));
   }, []);
 
+  // Verifica se o contato começa com "cliente"
+  const isClientContact = (name: string): boolean => {
+    return name.toLowerCase().trim().startsWith('cliente');
+  };
+
+  // Formata para garantir o padrão "cliente nome"
+  const formatContactName = (rawName: string): string => {
+    if (!rawName) return 'cliente';
+    const clean = rawName.replace(/^cliente\s+/i, '').trim();
+    return `cliente ${clean.toLowerCase()}`;
+  };
+
   const saveContacts = (newList: Contact[]) => {
     const uniqueMap = new Map();
     newList.forEach(c => {
@@ -122,15 +134,17 @@ const Contacts = () => {
       // @ts-ignore
       const results = await navigator.contacts.select(['name', 'tel'], { multiple: true });
       if (results?.length > 0) {
-        const imported = results.map((res: any) => ({
-          id: crypto.randomUUID(),
-          name: res.name?.[0] || 'Sem Nome',
-          phone: formatPhoneForAPI(res.tel?.[0] || ''),
-          group: 'Agenda Celular'
-        })).filter((c: Contact) => c.phone.length >= 12);
+        const imported = results
+          .filter((res: any) => isClientContact(res.name?.[0] || '')) // FILTRO: Só quem começa com cliente
+          .map((res: any) => ({
+            id: crypto.randomUUID(),
+            name: formatContactName(res.name?.[0]),
+            phone: formatPhoneForAPI(res.tel?.[0] || ''),
+            group: 'Agenda Celular'
+          })).filter((c: Contact) => c.phone.length >= 12);
         
         const count = saveContacts([...imported, ...contacts]);
-        alert(`Processado! Agora você tem ${count} contatos únicos.`);
+        alert(`Processado! Foram importados ${imported.length} contatos que seguiam a regra 'cliente'.`);
       }
     } catch (err) {
       console.error(err);
@@ -150,10 +164,12 @@ const Contacts = () => {
         cards.forEach(card => {
           const nameMatch = card.match(/FN:(.*)/);
           const telMatch = card.match(/TEL.*:(.*)/);
-          if (telMatch) {
+          const rawName = nameMatch ? nameMatch[1].trim() : '';
+          
+          if (telMatch && isClientContact(rawName)) { // FILTRO VCF
             newContacts.push({
               id: crypto.randomUUID(),
-              name: nameMatch ? nameMatch[1].trim() : 'Importado VCF',
+              name: formatContactName(rawName),
               phone: formatPhoneForAPI(telMatch[1]),
               group: 'Arquivo VCF'
             });
@@ -164,19 +180,22 @@ const Contacts = () => {
         lines.forEach(line => {
           const parts = line.split(/[,;]/);
           if (parts.length >= 2) {
-            newContacts.push({
-              id: crypto.randomUUID(),
-              name: parts[0].trim().replace(/"/g, ''),
-              phone: formatPhoneForAPI(parts[1]),
-              group: 'Arquivo CSV'
-            });
+            const rawName = parts[0].trim().replace(/"/g, '');
+            if (isClientContact(rawName)) { // FILTRO CSV
+              newContacts.push({
+                id: crypto.randomUUID(),
+                name: formatContactName(rawName),
+                phone: formatPhoneForAPI(parts[1]),
+                group: 'Arquivo CSV'
+              });
+            }
           }
         });
       }
       const validContacts = newContacts.filter(c => c.phone.length >= 12);
       saveContacts([...validContacts, ...contacts]);
       setIsProcessing(false);
-      alert(`${validContacts.length} contatos importados.`);
+      alert(`${validContacts.length} contatos válidos (regra 'cliente') importados.`);
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
     reader.readAsText(file);
@@ -227,7 +246,7 @@ const Contacts = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-800">Meus Contatos</h2>
-          <p className="text-sm text-slate-500">Banco de dados local do navegador</p>
+          <p className="text-sm text-slate-500">Apenas contatos começando com "cliente" são aceitos.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <input type="file" ref={fileInputRef} onChange={handleFileImport} accept=".vcf,.csv" className="hidden" />
@@ -247,7 +266,7 @@ const Contacts = () => {
           </thead>
           <tbody className="divide-y divide-slate-50">
             {contacts.length === 0 ? (
-              <tr><td colSpan={3} className="py-20 text-center text-slate-400 italic">Nenhum contato.</td></tr>
+              <tr><td colSpan={3} className="py-20 text-center text-slate-400 italic">Nenhum contato que siga a regra de nome.</td></tr>
             ) : (
               contacts.map(c => (
                 <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
@@ -275,14 +294,18 @@ const Contacts = () => {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-sm p-6 border border-slate-200 shadow-2xl">
             <h3 className="text-lg font-bold text-slate-800 mb-4">Adicionar Manual</h3>
+            <p className="text-[10px] text-slate-400 mb-4 uppercase font-bold italic">* O nome deve começar com "cliente"</p>
             <form onSubmit={(e) => {
               e.preventDefault();
+              if (!isClientContact(newName)) {
+                return alert("Erro: O nome deve começar obrigatoriamente com a palavra 'cliente'.");
+              }
               const formatted = formatPhoneForAPI(newPhone);
               if (formatted.length < 12) return alert("Número inválido.");
-              saveContacts([{ id: crypto.randomUUID(), name: newName, phone: formatted, group: 'Manual' }, ...contacts]);
+              saveContacts([{ id: crypto.randomUUID(), name: formatContactName(newName), phone: formatted, group: 'Manual' }, ...contacts]);
               setNewName(''); setNewPhone(''); setIsModalOpen(false);
             }} className="space-y-4">
-              <input required type="text" placeholder="Nome" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" />
+              <input required type="text" placeholder="Ex: cliente Jonatas" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" />
               <input required type="text" placeholder="DDD + Número" value={newPhone} onChange={e => setNewPhone(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" />
               <div className="flex gap-2">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-3 text-slate-500 font-bold">Cancelar</button>
