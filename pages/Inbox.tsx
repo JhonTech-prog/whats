@@ -3,6 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { IncomingMessage, AutomationSettings, Contact } from '../types';
 import { sendWhatsAppMessage } from '../services/whatsappService';
 
+const NOTIFICATION_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3';
+
 const Inbox: React.FC = () => {
   const [messages, setMessages] = useState<IncomingMessage[]>([]);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
@@ -14,15 +16,23 @@ const Inbox: React.FC = () => {
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
   const [mediaUrlInput, setMediaUrlInput] = useState('');
   const [mediaTypeSelect, setMediaTypeSelect] = useState<'image' | 'video' | 'audio' | 'document'>('image');
+  const [isSoundEnabled, setIsSoundEnabled] = useState(false);
   
   const pollingRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [selectedChat, messages]);
+
+  const playNotification = () => {
+    if (isSoundEnabled && audioRef.current) {
+      audioRef.current.play().catch(e => console.warn("Áudio bloqueado pelo navegador. Interaja com a página primeiro."));
+    }
+  };
 
   const loadContacts = () => {
     const saved = localStorage.getItem('wb_contacts');
@@ -31,26 +41,12 @@ const Inbox: React.FC = () => {
 
   useEffect(() => {
     loadContacts();
+    // Inicializar áudio
+    audioRef.current = new Audio(NOTIFICATION_SOUND_URL);
+    
     window.addEventListener('storage', loadContacts);
     return () => window.removeEventListener('storage', loadContacts);
   }, []);
-
-  const autoSaveContact = (phone: string, profileName?: string) => {
-    if (!profileName || profileName.toLowerCase().trim() !== 'cliente') return;
-    const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
-    const exists = contacts.find(c => c.phone === phone);
-    if (!exists) {
-      const newContact: Contact = {
-        id: crypto.randomUUID(),
-        name: `Lead Cliente ${phone.slice(-4)}`,
-        phone: phone,
-        group: 'Capturado via Chat'
-      };
-      const updated = [newContact, ...contacts];
-      localStorage.setItem('wb_contacts', JSON.stringify(updated));
-      setSavedContacts(updated);
-    }
-  };
 
   const fetchMessages = async (isManual = false, isDeepSync = false) => {
     const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
@@ -67,7 +63,6 @@ const Inbox: React.FC = () => {
       if (Array.isArray(rawData)) {
         const formattedMessages: IncomingMessage[] = rawData.map((m: any) => {
           const stableId = m.id || `${m.from}-${m.timestamp}`;
-          // Detectar tipo baseado em campos comuns de bridges (Baileys/WPPConnect)
           let type: any = m.type || 'text';
           if (m.mimetype?.startsWith('image/')) type = 'image';
           if (m.mimetype?.startsWith('video/')) type = 'video';
@@ -93,6 +88,11 @@ const Inbox: React.FC = () => {
         const newMessages = formattedMessages.filter(m => !existingIds.has(m.id));
 
         if (newMessages.length > 0 || isDeepSync) {
+          // Se houver novas mensagens e alguma NÃO for minha, toca o som
+          if (!isDeepSync && newMessages.some(m => !m.isMe)) {
+            playNotification();
+          }
+
           const updated = isDeepSync ? formattedMessages : [...localSaved, ...newMessages];
           updated.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
           localStorage.setItem('wb_incoming', JSON.stringify(updated));
@@ -114,7 +114,7 @@ const Inbox: React.FC = () => {
     const saved = localStorage.getItem('wb_incoming');
     if (saved) setMessages(JSON.parse(saved));
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
-  }, []);
+  }, [isSoundEnabled]); // Re-bind quando o som mudar
 
   const handleSendReply = async (mediaOptions?: any) => {
     if (!selectedChat || isSendingReply) return;
@@ -221,6 +221,12 @@ const Inbox: React.FC = () => {
           <span className="text-[10px] text-white font-bold uppercase tracking-widest">
             {serverHealth === 'up' ? 'Automação Ativa' : 'Ponte Offline'}
           </span>
+          <button 
+            onClick={() => setIsSoundEnabled(!isSoundEnabled)} 
+            className={`flex items-center gap-2 px-3 py-1 rounded-full text-[9px] font-bold transition-all ${isSoundEnabled ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/5 text-white/40 border border-white/10'}`}
+          >
+            {isSoundEnabled ? '🔔 SOM ATIVO' : '🔕 SEM SOM'}
+          </button>
         </div>
         <button onClick={() => fetchMessages(true)} className="text-[9px] font-bold bg-white/10 text-white px-3 py-1 rounded hover:bg-white/20 uppercase">Sync</button>
       </div>
@@ -306,6 +312,18 @@ const Inbox: React.FC = () => {
               <div className="w-24 h-24 bg-white/50 rounded-full flex items-center justify-center text-4xl mb-4 grayscale opacity-30 shadow-sm">🤖</div>
               <h3 className="font-bold text-slate-500 uppercase tracking-widest text-xs">Aguardando Interação</h3>
               <p className="text-[10px] mt-2 max-w-[200px]">Selecione um chat para ver as mídias e responder.</p>
+              
+              {!isSoundEnabled && (
+                <button 
+                  onClick={() => {
+                    setIsSoundEnabled(true);
+                    playNotification();
+                  }}
+                  className="mt-6 px-6 py-3 bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-all"
+                >
+                  🔔 ATIVAR NOTIFICAÇÃO SONORA
+                </button>
+              )}
             </div>
           )}
         </div>
