@@ -7,6 +7,9 @@ export interface MetaConfig {
 export interface SendMessageOptions {
   templateName?: string;
   languageCode?: string;
+  mediaType?: 'image' | 'video' | 'audio' | 'document';
+  mediaUrl?: string;
+  fileName?: string;
 }
 
 export const sendWhatsAppMessage = async (
@@ -17,6 +20,7 @@ export const sendWhatsAppMessage = async (
 ): Promise<{ success: boolean; error?: string }> => {
   try {
     const isTemplate = !!options?.templateName;
+    const isMedia = !!options?.mediaUrl;
     
     const body: any = {
       messaging_product: "whatsapp",
@@ -31,6 +35,12 @@ export const sendWhatsAppMessage = async (
         language: {
           code: options.languageCode || "pt_BR"
         }
+      };
+    } else if (isMedia && options.mediaType) {
+      body.type = options.mediaType;
+      body[options.mediaType] = {
+        link: options.mediaUrl,
+        ...(options.fileName ? { filename: options.fileName } : {})
       };
     } else {
       body.type = "text";
