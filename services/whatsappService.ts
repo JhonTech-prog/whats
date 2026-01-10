@@ -4,25 +4,46 @@ export interface MetaConfig {
   phoneId: string;
 }
 
+export interface SendMessageOptions {
+  templateName?: string;
+  languageCode?: string;
+}
+
 export const sendWhatsAppMessage = async (
   to: string,
   text: string,
-  config: MetaConfig
+  config: MetaConfig,
+  options?: SendMessageOptions
 ): Promise<{ success: boolean; error?: string }> => {
   try {
+    const isTemplate = !!options?.templateName;
+    
+    const body: any = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: to,
+    };
+
+    if (isTemplate) {
+      body.type = "template";
+      body.template = {
+        name: options.templateName,
+        language: {
+          code: options.languageCode || "pt_BR"
+        }
+      };
+    } else {
+      body.type = "text";
+      body.text = { body: text };
+    }
+
     const response = await fetch(`https://graph.facebook.com/v21.0/${config.phoneId}/messages`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${config.accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: to,
-        type: "text",
-        text: { body: text }
-      })
+      body: JSON.stringify(body)
     });
 
     const data = await response.json();
