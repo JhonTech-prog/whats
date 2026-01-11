@@ -19,11 +19,11 @@ export const sendWhatsAppMessage = async (
   options?: SendMessageOptions
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    // Saneamento CRÍTICO: Meta exige apenas números (Dígitos)
+    // RESOLVE ERRO #131009: Remove tudo que não for número (tira o +)
     const cleanTo = to.replace(/\D/g, '');
     
-    // Evita envio de texto vazio que causa erro de parâmetro
-    const messageText = text || ' ';
+    // Garante que o texto não vá nulo/vazio
+    const messageText = (text || ' ').trim() || '...';
     
     const isTemplate = !!options?.templateName;
     const isMedia = !!options?.mediaUrl && !!options?.mediaType;
