@@ -19,11 +19,8 @@ export const sendWhatsAppMessage = async (
   options?: SendMessageOptions
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    // RESOLVE ERRO #131009: Remove tudo que não for número (tira o +)
+    // Saneamento: Meta REJEITA o caractere "+" no campo "to"
     const cleanTo = to.replace(/\D/g, '');
-    
-    // Garante que o texto não vá nulo/vazio
-    const messageText = (text || ' ').trim() || '...';
     
     const isTemplate = !!options?.templateName;
     const isMedia = !!options?.mediaUrl && !!options?.mediaType;
@@ -50,7 +47,7 @@ export const sendWhatsAppMessage = async (
       };
     } else {
       body.type = "text";
-      body.text = { body: messageText };
+      body.text = { body: text || ' ' };
     }
 
     const response = await fetch(`https://graph.facebook.com/v21.0/${config.phoneId}/messages`, {
