@@ -19,13 +19,16 @@ export const sendWhatsAppMessage = async (
   options?: SendMessageOptions
 ): Promise<{ success: boolean; error?: string }> => {
   try {
+    // Saneamento: Meta exige apenas números no campo "to"
+    const cleanTo = to.replace(/\D/g, '');
+    
     const isTemplate = !!options?.templateName;
-    const isMedia = !!options?.mediaUrl;
+    const isMedia = !!options?.mediaUrl && !!options?.mediaType;
     
     const body: any = {
       messaging_product: "whatsapp",
       recipient_type: "individual",
-      to: to,
+      to: cleanTo,
     };
 
     if (isTemplate) {
@@ -36,9 +39,9 @@ export const sendWhatsAppMessage = async (
           code: options.languageCode || "pt_BR"
         }
       };
-    } else if (isMedia && options.mediaType) {
+    } else if (isMedia) {
       body.type = options.mediaType;
-      body[options.mediaType] = {
+      body[options.mediaType!] = {
         link: options.mediaUrl,
         ...(options.fileName ? { filename: options.fileName } : {})
       };
@@ -63,10 +66,10 @@ export const sendWhatsAppMessage = async (
     } else {
       return { 
         success: false, 
-        error: data.error?.message || 'Erro desconhecido na API da Meta' 
+        error: data.error?.message || 'Erro na API da Meta' 
       };
     }
   } catch (err) {
-    return { success: false, error: 'Erro de conexão com os servidores da Meta' };
+    return { success: false, error: 'Erro de conexão com a Meta' };
   }
 };
