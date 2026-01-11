@@ -77,26 +77,39 @@ const Inbox: React.FC = () => {
     const finalUrl = baseUrl.includes('/messages') ? baseUrl : `${baseUrl}/messages`;
 
     try {
-      const response = await fetch(`${finalUrl}?nocache=${Date.now()}`, {
-        headers: { 'Accept': 'application/json' }
-      });
-      
+      const response = await fetch(`${finalUrl}?t=${Date.now()}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
       const data = await response.json();
-      setDebugData(data); // Salva para depuração se necessário
+      setDebugData(data);
       setStatus('online');
       setErrorLog('');
       setLastSync(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 
-      let list: any[] = [];
-      if (Array.isArray(data)) list = data;
-      else if (data.messages && Array.isArray(data.messages)) list = data.messages;
-      else if (data.data && Array.isArray(data.data)) list = data.data;
-      else if (data.entry?.[0]?.changes?.[0]?.value?.messages) list = data.entry[0].changes[0].value.messages;
+      // DECODIFICADOR DE ESTRUTURA
+      let msgList: any[] = [];
+      let contactMap: Record<string, string> = {};
 
-      if (list && list.length > 0) {
-        processRawList(list);
+      // Caso 1: Estrutura oficial da Meta (Webhook dump)
+      if (data.entry?.[0]?.changes?.[0]?.value) {
+        const value = data.entry[0].changes[0].value;
+        msgList = value.messages || [];
+        // Mapeia nomes dos perfis
+        value.contacts?.forEach((c: any) => {
+          contactMap[c.wa_id] = c.profile?.name || '';
+        });
+      } 
+      // Caso 2: Lista simples (Array de objetos)
+      else if (Array.isArray(data)) {
+        msgList = data;
+      }
+      // Caso 3: Objeto com chave messages
+      else if (data.messages) {
+        msgList = data.messages;
+      }
+
+      if (msgList.length > 0) {
+        processMessages(msgList, contactMap);
       }
     } catch (err: any) {
       setStatus('offline');
@@ -104,39 +117,47 @@ const Inbox: React.FC = () => {
     }
   };
 
-  const processRawList = (rawList: any[]) => {
+  const processMessages = (rawList: any[], contactMap: Record<string, string>) => {
     const news: IncomingMessage[] = rawList.map((m: any): IncomingMessage => {
-      // Extração de Telefone
-      const rawFrom = m.from || m.remoteJid || m.key?.remoteJid || m.participant || '';
-      const phone = rawFrom.split('@')[0].replace(/\D/g, '');
+      // 1. EXTRAÇÃO DE TELEFONE (Super robusta)
+      let rawFrom = m.from || m.wa_id || m.remoteJid || m.key?.remoteJid || '';
+      // Limpa @s.whatsapp.net ou @c.us se existir
+      let phone = rawFrom.split('@')[0].replace(/\D/g, '');
+      
+      // Se ainda estiver vazio, tenta buscar no ID
+      if (!phone && m.id) {
+        const match = m.id.match(/^(\d+)/);
+        if (match) phone = match[1];
+      }
 
-      // Extração de Texto com busca profunda
+      // 2. EXTRAÇÃO DE TEXTO (Multi-nível)
       let text = '';
       if (typeof m.text === 'string') text = m.text;
-      else if (m.text?.body) text = m.text.body;
-      else if (m.message?.conversation) text = m.message.conversation;
+      else if (m.text?.body) text = m.text.body; // Padrão Meta API
+      else if (m.message?.conversation) text = m.message.conversation; // Padrão Baileys
       else if (m.message?.extendedTextMessage?.text) text = m.message.extendedTextMessage.text;
       else if (m.body) text = m.body;
       else if (m.caption) text = m.caption;
-      else if (m.type === 'image' || m.type === 'video') text = `[Mídia: ${m.type}]`;
 
-      // Conversão de Timestamp Robusta (suporta string, número e segundos/milisegundos)
+      // 3. EXTRAÇÃO DE NOME
+      let name = m.pushName || m.name || contactMap[phone] || '';
+
+      // 4. TIMESTAMP
       let rawTs = m.timestamp || m.messageTimestamp || Date.now();
-      let tsInMs = Number(rawTs);
-      if (isNaN(tsInMs)) tsInMs = Date.now();
-      else if (tsInMs < 10000000000) tsInMs *= 1000; // Converte segundos para milisegundos
+      let ts = Number(rawTs);
+      if (ts < 10000000000) ts *= 1000;
 
       return {
-        id: m.id || m.key?.id || `msg-${phone}-${tsInMs}`,
-        from: phone,
-        fromName: m.pushName || m.name || m.fromName || '',
-        text: text.trim() || 'Mensagem sem texto',
-        timestamp: new Date(tsInMs).toISOString(),
+        id: m.id || m.key?.id || `msg-${phone}-${ts}`,
+        from: phone || 'desconhecido',
+        fromName: name,
+        text: text.trim() || (m.type ? `[Mídia: ${m.type}]` : 'Mensagem recebida'),
+        timestamp: new Date(ts).toISOString(),
         unread: true,
         isMe: !!m.isMe || !!m.key?.fromMe,
         type: 'text'
       };
-    }).filter(m => m.from && m.id);
+    }).filter(m => m.from !== 'desconhecido');
 
     const currentLocal: IncomingMessage[] = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
     const existingIds = new Set(currentLocal.map(m => m.id));
@@ -202,38 +223,36 @@ const Inbox: React.FC = () => {
 
   return (
     <div className="bg-white rounded-none md:rounded-2xl border-0 md:border border-slate-200 shadow-sm overflow-hidden h-screen md:h-[calc(100vh-200px)] flex flex-col relative">
-      {/* Diagnóstico Flutuante */}
       {showDebug && debugData && (
         <div className="absolute inset-0 z-[100] bg-slate-900/95 text-emerald-400 p-6 overflow-auto font-mono text-[10px]">
           <div className="flex justify-between mb-4">
-            <h2 className="text-white font-bold">DADOS BRUTOS DA PONTE:</h2>
+            <h2 className="text-white font-bold">RAW JSON DATA:</h2>
             <button onClick={() => setShowDebug(false)} className="bg-rose-500 text-white px-4 py-1 rounded">FECHAR</button>
           </div>
           <pre>{JSON.stringify(debugData, null, 2)}</pre>
         </div>
       )}
 
-      {/* Status Bar */}
       <div className={`px-4 py-2 flex justify-between items-center text-[10px] text-white font-bold transition-all ${status === 'online' ? 'bg-[#0b141a]' : 'bg-rose-600'}`}>
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-white'}`}></div>
-          <span className="uppercase tracking-widest">{status === 'online' ? 'Sistema Online' : `Erro de Conexão: ${errorLog}`}</span>
-          {debugData && <button onClick={() => setShowDebug(true)} className="ml-2 underline opacity-50">Depurar</button>}
+          <span className="uppercase tracking-widest">
+            {status === 'online' ? `Online - ${debugData ? (Array.isArray(debugData) ? debugData.length : 'Dados') : '0'} msg no servidor` : `Erro: ${errorLog}`}
+          </span>
+          <button onClick={() => setShowDebug(true)} className="ml-2 underline opacity-50">Depurar JSON</button>
         </div>
         <div className="flex gap-4">
           <span>{lastSync}</span>
-          <button onClick={() => { if(confirm("Apagar histórico visual?")) { localStorage.removeItem('wb_incoming'); setMessages([]); setSelectedChat(null); } }} className="text-rose-300">LIMPAR TELA</button>
+          <button onClick={() => { if(confirm("Limpar?")) { localStorage.removeItem('wb_incoming'); setMessages([]); setSelectedChat(null); } }} className="text-rose-300">LIMPAR</button>
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
         <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-slate-100 flex-col bg-white overflow-y-auto`}>
           {sortedChats.length === 0 ? (
             <div className="p-10 text-center mt-10 opacity-30">
               <div className="text-4xl mb-4">📬</div>
-              <p className="text-[10px] font-black uppercase">Caixa de Entrada Vazia</p>
-              <p className="text-[9px] mt-2">Aguardando mensagens do Webhook...</p>
+              <p className="text-[10px] font-black uppercase">Vazio</p>
             </div>
           ) : (
             sortedChats.map(phone => {
@@ -255,7 +274,6 @@ const Inbox: React.FC = () => {
           )}
         </div>
 
-        {/* Chat */}
         <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#e5ddd5]`}>
           {selectedChat ? (
             <>
@@ -293,8 +311,7 @@ const Inbox: React.FC = () => {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10 text-center opacity-30">
               <div className="text-8xl mb-6">💬</div>
-              <h3 className="font-black uppercase tracking-widest text-xs">Chat WhatsApp Ativo</h3>
-              <p className="text-[10px] mt-2">Suas mensagens aparecerão aqui automaticamente.</p>
+              <h3 className="font-black uppercase tracking-widest text-xs">Aguardando Mensagens</h3>
             </div>
           )}
         </div>
