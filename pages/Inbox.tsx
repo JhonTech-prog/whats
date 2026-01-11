@@ -27,14 +27,12 @@ const Inbox: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isMounted = useRef(true);
 
-  // Auto-scroll para a última mensagem
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [selectedChat, messages]);
 
-  // Inicialização
   useEffect(() => {
     isMounted.current = true;
     audioRef.current = new Audio(NOTIFICATION_SOUND_URL);
@@ -51,7 +49,7 @@ const Inbox: React.FC = () => {
     const poll = async () => {
       if (!isMounted.current) return;
       await fetchMessages();
-      setTimeout(poll, 3000); // Polling mais rápido (3s) para teste
+      setTimeout(poll, 4000); 
     };
     poll();
 
@@ -89,22 +87,33 @@ const Inbox: React.FC = () => {
       if (!Array.isArray(data)) throw new Error("API não retornou uma lista []");
 
       setApiLog({ 
-        status: `Online - ${data.length} msg no servidor`, 
+        status: `Conectado (${data.length} msg)`, 
         lastUpdate: new Date().toLocaleTimeString(), 
         type: 'success' 
       });
 
       const formatted: IncomingMessage[] = data.map((m: any) => {
-        // Mapeamento universal de campos de texto da API
-        const extractedText = m.text || m.body || m.caption || m.message || '';
+        // EXTRAÇÃO ROBUSTA DE TEXTO (Suporta m.text.body da Meta e strings diretas)
+        let extractedText = '';
+        if (typeof m.text === 'object' && m.text?.body) {
+          extractedText = m.text.body;
+        } else {
+          extractedText = m.text || m.body || m.caption || m.message || '';
+        }
+
         const mime = m.mimetype || '';
+        const timestamp = m.timestamp || new Date().toISOString();
         
+        // ID DETERMINÍSTICO para evitar duplicados no polling
+        // Se a API não manda ID, criamos um baseado no remetente + tempo + conteúdo
+        const deterministicId = m.id || `id-${m.from}-${timestamp}-${extractedText.length}`;
+
         return {
-          id: m.id || `msg-${m.from}-${m.timestamp}-${Math.random().toString(36).substr(2, 5)}`,
+          id: deterministicId,
           from: m.from || 'unknown',
           fromName: m.name || m.fromName || undefined,
           text: extractedText,
-          timestamp: m.timestamp || new Date().toISOString(),
+          timestamp: timestamp,
           unread: m.unread !== undefined ? m.unread : true,
           isMe: !!m.isMe,
           type: mime.startsWith('image/') ? 'image' : 
@@ -125,13 +134,14 @@ const Inbox: React.FC = () => {
         }
 
         const merged = forceManual ? formatted : [...currentLocal, ...newOnly];
+        // Ordena por data
         merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
         
         setMessages(merged);
         localStorage.setItem('wb_incoming', JSON.stringify(merged));
       }
     } catch (err: any) {
-      setApiLog({ status: err.message, lastUpdate: new Date().toLocaleTimeString(), type: 'error' });
+      setApiLog({ status: 'Falha: ' + err.message, lastUpdate: new Date().toLocaleTimeString(), type: 'error' });
     } finally {
       setIsFetching(false);
     }
@@ -149,9 +159,9 @@ const Inbox: React.FC = () => {
 
     if (res.success) {
       const myMsg: IncomingMessage = {
-        id: `sent-${Date.now()}`,
+        id: `sent-${Date.now()}-${Math.random()}`,
         from: selectedChat,
-        text: media ? `[Mídia: ${media.mediaType}]` : replyText,
+        text: media ? `[Mídia enviada]` : replyText,
         timestamp: new Date().toISOString(),
         unread: false,
         isMe: true,
@@ -164,9 +174,17 @@ const Inbox: React.FC = () => {
       setReplyText('');
       setIsMediaModalOpen(false);
     } else {
-      alert("Falha no envio: " + res.error);
+      alert("Erro ao responder: " + res.error);
     }
     setIsSendingReply(false);
+  };
+
+  const clearChat = () => {
+    if (!confirm("Deseja apagar o histórico local desta conversa?")) return;
+    const updated = messages.filter(m => m.from !== selectedChat);
+    setMessages(updated);
+    localStorage.setItem('wb_incoming', JSON.stringify(updated));
+    setSelectedChat(null);
   };
 
   const getDisplayName = (phone: string) => {
@@ -191,25 +209,17 @@ const Inbox: React.FC = () => {
 
   return (
     <div className="bg-white rounded-none md:rounded-2xl border-0 md:border border-slate-200 shadow-sm overflow-hidden h-screen md:h-[calc(100vh-200px)] flex flex-col">
-      {/* Cabeçalho de Status */}
-      <div className="px-4 py-2 bg-slate-900 flex justify-between items-center text-white border-b border-slate-800 shrink-0">
-        <div className="flex items-center gap-4 overflow-hidden">
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <div className={`w-2 h-2 rounded-full ${apiLog.type === 'success' ? 'bg-emerald-500 animate-pulse' : apiLog.type === 'error' ? 'bg-rose-500' : 'bg-amber-500'}`}></div>
-            <span className="text-[10px] font-bold uppercase tracking-widest hidden sm:inline">Status</span>
-          </div>
-          <div className="flex flex-col min-w-0">
-            <span className={`text-[9px] font-mono truncate ${apiLog.type === 'error' ? 'text-rose-400' : 'text-emerald-400'}`}>
-              {apiLog.status}
-            </span>
-          </div>
+      {/* Status Bar */}
+      <div className="px-4 py-2 bg-slate-900 flex justify-between items-center text-white shrink-0">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${apiLog.type === 'success' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
+          <span className="text-[10px] font-mono text-emerald-400 truncate">{apiLog.status}</span>
         </div>
-        
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <button onClick={() => setIsSoundEnabled(!isSoundEnabled)} className={`p-2 rounded-lg border transition-all ${isSoundEnabled ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-white/5 border-white/10 text-white/40'}`}>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setIsSoundEnabled(!isSoundEnabled)} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
             {isSoundEnabled ? '🔔' : '🔕'}
           </button>
-          <button onClick={() => fetchMessages(true)} disabled={isFetching} className="bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase disabled:opacity-50">
+          <button onClick={() => fetchMessages(true)} className="bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-[9px] font-bold uppercase">
             {isFetching ? '...' : 'Sincronizar'}
           </button>
         </div>
@@ -221,13 +231,13 @@ const Inbox: React.FC = () => {
           {sortedChats.length === 0 ? (
             <div className="p-12 text-center opacity-30 mt-10">
               <p className="text-4xl mb-4">📤</p>
-              <p className="text-[10px] font-bold uppercase">Aguardando Mensagens...</p>
+              <p className="text-[10px] font-bold uppercase">Sem mensagens</p>
             </div>
           ) : (
             sortedChats.map(phone => {
               const display = getDisplayName(phone);
               const last = chatGroups[phone][chatGroups[phone].length - 1];
-              const previewText = last.text || (last.type !== 'text' ? `[Mídia: ${last.type}]` : '[Mensagem de texto]');
+              const previewText = last.text || `[${last.type || 'Mídia'}]`;
               
               return (
                 <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left border-b border-slate-50 transition-all ${selectedChat === phone ? 'bg-emerald-50/70 border-r-4 border-r-emerald-500' : 'hover:bg-slate-50'}`}>
@@ -235,9 +245,9 @@ const Inbox: React.FC = () => {
                     {display.isSaved ? '👤' : '👥'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-center mb-0.5">
+                    <div className="flex justify-between items-center">
                       <p className="font-bold text-slate-800 text-sm truncate">{display.name}</p>
-                      <span className="text-[8px] text-slate-400 font-bold uppercase">{new Date(last.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                      <span className="text-[8px] text-slate-400 font-bold">{new Date(last.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                     </div>
                     <p className="text-xs text-slate-500 truncate">{previewText}</p>
                   </div>
@@ -251,39 +261,41 @@ const Inbox: React.FC = () => {
         <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#efeae2] relative`}>
           {selectedChat ? (
             <>
-              <div className="p-3 bg-white border-b border-slate-200 flex items-center gap-3 z-10 shadow-sm shrink-0">
-                <button onClick={() => setSelectedChat(null)} className="md:hidden text-slate-400 text-xl px-2">←</button>
-                <div className="w-9 h-9 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center font-bold text-sm">
-                  {getDisplayName(selectedChat).isSaved ? '👤' : '👥'}
+              <div className="p-3 bg-white border-b border-slate-200 flex items-center justify-between z-10 shadow-sm shrink-0">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setSelectedChat(null)} className="md:hidden text-slate-400 text-xl px-2">←</button>
+                  <div className="w-9 h-9 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center font-bold text-sm">
+                    {getDisplayName(selectedChat).isSaved ? '👤' : '👥'}
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-800 text-sm leading-tight">{getDisplayName(selectedChat).name}</p>
+                    <p className="text-[9px] text-slate-400">+{selectedChat}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-bold text-slate-800 text-sm leading-tight">{getDisplayName(selectedChat).name}</p>
-                  <p className="text-[9px] text-slate-400 font-mono tracking-tighter">+{selectedChat}</p>
-                </div>
+                <button onClick={clearChat} className="text-slate-300 hover:text-rose-500 p-2" title="Limpar Histórico Local">🗑️</button>
               </div>
 
-              <div ref={scrollRef} className="flex-1 p-4 md:p-6 overflow-y-auto space-y-3 flex flex-col">
-                {chatGroups[selectedChat].map((msg: any) => {
-                  const contentText = msg.text || (msg.type === 'text' ? '[Mensagem sem conteúdo]' : '');
-                  return (
-                    <div key={msg.id} className={`max-w-[85%] p-3 rounded-xl shadow-sm border text-sm ${
-                      msg.isMe ? 'bg-[#dcf8c6] border-[#c1e8a0] self-end rounded-tr-none' : 'bg-white border-slate-200 self-start rounded-tl-none'
-                    }`}>
-                      {msg.type === 'image' && <img src={msg.mediaUrl} className="rounded mb-2 max-w-full cursor-pointer" onClick={() => window.open(msg.mediaUrl, '_blank')} />}
-                      {msg.type === 'video' && <video src={msg.mediaUrl} controls className="rounded mb-2 max-w-full" />}
-                      {msg.type === 'audio' && <audio src={msg.mediaUrl} controls className="mb-2 h-8" />}
-                      
-                      {contentText && (
-                        <p className="whitespace-pre-wrap text-slate-800 leading-relaxed text-[13px]">{contentText}</p>
-                      )}
-                      
-                      <div className="flex justify-end mt-1 opacity-40 text-[8px] font-black uppercase tracking-tighter">
-                        {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                        {msg.isMe && <span className="ml-1 text-blue-500">✓✓</span>}
-                      </div>
+              <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto space-y-3 flex flex-col">
+                {chatGroups[selectedChat].map((msg: any) => (
+                  <div key={msg.id} className={`max-w-[85%] p-3 rounded-xl shadow-sm border text-sm ${
+                    msg.isMe ? 'bg-[#dcf8c6] border-[#c1e8a0] self-end rounded-tr-none' : 'bg-white border-slate-200 self-start rounded-tl-none'
+                  }`}>
+                    {msg.type === 'image' && <img src={msg.mediaUrl} className="rounded mb-2 max-w-full cursor-pointer" onClick={() => window.open(msg.mediaUrl, '_blank')} />}
+                    {msg.type === 'video' && <video src={msg.mediaUrl} controls className="rounded mb-2 max-w-full" />}
+                    {msg.type === 'audio' && <audio src={msg.mediaUrl} controls className="mb-2 h-8" />}
+                    
+                    {msg.text ? (
+                      <p className="whitespace-pre-wrap text-slate-800 leading-relaxed text-[13px]">{msg.text}</p>
+                    ) : (
+                      !msg.mediaUrl && <p className="italic text-slate-400 text-[11px]">[Sem conteúdo textual]</p>
+                    )}
+                    
+                    <div className="flex justify-end mt-1 opacity-40 text-[8px] font-black uppercase tracking-tighter">
+                      {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                      {msg.isMe && <span className="ml-1 text-blue-500">✓✓</span>}
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
 
               <div className="p-3 bg-white border-t border-slate-200 shrink-0">
@@ -300,7 +312,7 @@ const Inbox: React.FC = () => {
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-12 text-center">
               <div className="w-20 h-20 bg-white/50 rounded-full flex items-center justify-center text-3xl mb-4 grayscale opacity-30 shadow-sm animate-pulse">📥</div>
               <h3 className="font-bold text-slate-500 uppercase tracking-widest text-[10px]">Caixa de Entrada</h3>
-              <p className="text-[10px] mt-2 max-w-[200px]">Selecione um contato para visualizar as mensagens recebidas.</p>
+              <p className="text-[10px] mt-2 max-w-[200px]">Aguardando mensagens do seu servidor no Render.</p>
             </div>
           )}
         </div>
@@ -308,19 +320,19 @@ const Inbox: React.FC = () => {
 
       {isMediaModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-800 mb-4">📎 Enviar Mídia</h3>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-slate-100">
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">📂 Enviar Arquivo</h3>
             <div className="space-y-4">
-              <select value={mediaTypeSelect} onChange={(e: any) => setMediaTypeSelect(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm">
+              <select value={mediaTypeSelect} onChange={(e: any) => setMediaTypeSelect(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none">
                 <option value="image">Imagem</option>
                 <option value="video">Vídeo</option>
                 <option value="audio">Áudio</option>
                 <option value="document">Documento</option>
               </select>
-              <input type="text" value={mediaUrlInput} onChange={(e) => setMediaUrlInput(e.target.value)} placeholder="URL do arquivo" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none" />
+              <input type="text" value={mediaUrlInput} onChange={(e) => setMediaUrlInput(e.target.value)} placeholder="URL pública do arquivo" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none" />
               <div className="flex gap-2 pt-2">
                 <button onClick={() => setIsMediaModalOpen(false)} className="flex-1 py-3 text-slate-500 font-bold text-sm">Sair</button>
-                <button onClick={() => handleSendReply({ mediaType: mediaTypeSelect, mediaUrl: mediaUrlInput })} disabled={!mediaUrlInput || isSendingReply} className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-xl text-sm">Enviar</button>
+                <button onClick={() => handleSendReply({ mediaType: mediaTypeSelect, mediaUrl: mediaUrlInput })} disabled={!mediaUrlInput || isSendingReply} className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-100 text-sm">Enviar Agora</button>
               </div>
             </div>
           </div>
