@@ -19,7 +19,7 @@ export const sendWhatsAppMessage = async (
   options?: SendMessageOptions
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    // Saneamento rigoroso: Meta não aceita "+" ou espaços no número
+    // Saneamento: Meta REJEITA o caractere "+" ou espaços
     const cleanTo = to.replace(/\D/g, '');
     
     const isTemplate = !!options?.templateName;
