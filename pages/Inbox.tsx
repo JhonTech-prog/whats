@@ -19,25 +19,31 @@ const Inbox: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isMounted = useRef(true);
 
+  // Scroll automático
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [selectedChat, messages]);
 
+  // Ciclo de vida e Polling
   useEffect(() => {
     isMounted.current = true;
     audioRef.current = new Audio(NOTIFICATION_SOUND_URL);
     
-    const savedC = localStorage.getItem('wb_contacts');
-    if (savedC) setSavedContacts(JSON.parse(savedC));
-    
-    const savedM = localStorage.getItem('wb_incoming');
-    if (savedM) setMessages(JSON.parse(savedM));
+    const loadData = () => {
+      const savedC = localStorage.getItem('wb_contacts');
+      if (savedC) setSavedContacts(JSON.parse(savedC));
+      
+      const savedM = localStorage.getItem('wb_incoming');
+      if (savedM) setMessages(JSON.parse(savedM));
+    };
+
+    loadData();
 
     const interval = setInterval(() => {
       if (isMounted.current) fetchMessages();
-    }, 3000);
+    }, 4000);
 
     return () => {
       isMounted.current = false;
@@ -57,22 +63,31 @@ const Inbox: React.FC = () => {
     try {
       const response = await fetch(`${finalUrl}?t=${Date.now()}`, { cache: 'no-store' });
       const data = await response.json();
-      if (!Array.isArray(data)) return;
+      
+      if (!Array.isArray(data)) {
+        setIsFetching(false);
+        return;
+      }
 
       const formatted: IncomingMessage[] = data.map((m: any) => {
-        // CAPTURA DE TEXTO ROBUSTA (Resolve o problema do "Oi" invisível)
+        // Limpa o número de telefone (remove @s.whatsapp.net se houver)
+        const cleanPhone = (m.from || '').replace(/@.*$/, '').replace(/\D/g, '');
+
+        // Captura de texto robusta
         let textContent = '';
         if (m.text && typeof m.text === 'object') {
           textContent = m.text.body || '';
         } else if (m.message?.conversation) {
           textContent = m.message.conversation;
+        } else if (m.body) {
+          textContent = m.body;
         } else {
-          textContent = m.text || m.body || m.caption || '';
+          textContent = m.text || m.caption || '';
         }
 
         return {
-          id: m.id || `msg-${m.from}-${m.timestamp}-${textContent.length}`,
-          from: m.from || 'unknown',
+          id: m.id || `msg-${cleanPhone}-${m.timestamp}-${textContent.length}`,
+          from: cleanPhone || 'unknown',
           fromName: m.name || m.fromName,
           text: textContent,
           timestamp: m.timestamp || new Date().toISOString(),
@@ -93,11 +108,15 @@ const Inbox: React.FC = () => {
         );
         setMessages(merged);
         localStorage.setItem('wb_incoming', JSON.stringify(merged));
-        if (newOnly.some(m => !m.isMe)) audioRef.current?.play().catch(() => {});
+        
+        // Toca som se for mensagem de outro
+        if (newOnly.some(m => !m.isMe)) {
+          audioRef.current?.play().catch(() => {});
+        }
       }
       setLastSync(new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }));
     } catch (err) {
-      console.error("Erro sync:", err);
+      console.error("Erro na sincronização:", err);
     } finally {
       setIsFetching(false);
     }
@@ -134,8 +153,14 @@ const Inbox: React.FC = () => {
   };
 
   const getDisplayName = (phone: string) => {
-    const contact = savedContacts.find(c => c.phone === phone);
-    return contact ? contact.name : `+${phone}`;
+    // Saneia o telefone para comparação
+    const cleanPhone = phone.replace(/\D/g, '');
+    const contact = savedContacts.find(c => c.phone.replace(/\D/g, '') === cleanPhone);
+    if (contact) return contact.name;
+    
+    // Tenta achar o nome nos metadados da mensagem se não estiver na agenda
+    const msg = messages.find(m => m.from === phone && m.fromName);
+    return msg?.fromName || `+${phone}`;
   };
 
   const chatGroups = messages.reduce((acc: any, msg) => {
@@ -153,30 +178,36 @@ const Inbox: React.FC = () => {
 
   return (
     <div className="bg-white rounded-none md:rounded-2xl border-0 md:border border-slate-200 shadow-sm overflow-hidden h-screen md:h-[calc(100vh-200px)] flex flex-col">
+      {/* Barra de Status */}
       <div className="px-4 py-2 bg-slate-900 flex justify-between items-center text-[10px] text-white font-bold uppercase tracking-widest shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
           Sincronizado: {lastSync}
         </div>
-        <button onClick={() => { localStorage.removeItem('wb_incoming'); setMessages([]); }} className="text-rose-400">Limpar</button>
+        <button onClick={() => { localStorage.removeItem('wb_incoming'); setMessages([]); }} className="text-rose-400 hover:text-white transition-colors">Limpar Conversas</button>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar de Chats */}
         <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-slate-100 flex-col bg-white overflow-y-auto`}>
           {sortedChats.length === 0 ? (
-            <div className="p-12 text-center opacity-30 mt-10 text-[10px] font-bold uppercase">Sem mensagens</div>
+            <div className="p-12 text-center opacity-30 mt-10">
+              <div className="text-4xl mb-4 text-center">📥</div>
+              <p className="text-[10px] font-bold uppercase">Nenhuma mensagem</p>
+            </div>
           ) : (
             sortedChats.map(phone => {
               const last = chatGroups[phone][chatGroups[phone].length - 1];
+              const isSelected = selectedChat === phone;
               return (
-                <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left border-b border-slate-50 ${selectedChat === phone ? 'bg-emerald-50 border-r-4 border-r-emerald-500' : ''}`}>
-                  <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-400 shrink-0">👤</div>
+                <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left border-b border-slate-50 transition-all ${isSelected ? 'bg-emerald-50 border-r-4 border-r-emerald-500' : 'hover:bg-slate-50'}`}>
+                  <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-400 shrink-0 text-xl">👤</div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center">
                       <p className="font-bold text-slate-800 text-sm truncate">{getDisplayName(phone)}</p>
                       <span className="text-[9px] text-slate-400">{new Date(last.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                     </div>
-                    <p className="text-xs text-slate-500 truncate mt-0.5">{last.text || "[Mídia]"}</p>
+                    <p className="text-xs text-slate-500 truncate mt-0.5">{last.text || "[Arquivo]"}</p>
                   </div>
                 </button>
               );
@@ -184,13 +215,17 @@ const Inbox: React.FC = () => {
           )}
         </div>
 
-        <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#efeae2]`}>
+        {/* Janela de Chat */}
+        <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#efeae2] relative`}>
           {selectedChat ? (
             <>
-              <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-3 shrink-0 shadow-sm">
+              <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-3 shrink-0 shadow-sm z-10">
                 <button onClick={() => setSelectedChat(null)} className="md:hidden text-slate-400 text-2xl mr-2">←</button>
                 <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center font-bold text-sm">👤</div>
-                <div className="font-bold text-slate-800 text-sm">{getDisplayName(selectedChat)}</div>
+                <div>
+                  <div className="font-bold text-slate-800 text-sm">{getDisplayName(selectedChat)}</div>
+                  <div className="text-[10px] text-slate-400">+{selectedChat}</div>
+                </div>
               </div>
 
               <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto space-y-3 flex flex-col">
@@ -200,8 +235,9 @@ const Inbox: React.FC = () => {
                   }`}>
                     {msg.text && <p className="whitespace-pre-wrap text-slate-800 leading-relaxed">{msg.text}</p>}
                     {msg.mediaUrl && <div className="mt-2 text-[10px] text-blue-500 underline cursor-pointer" onClick={() => window.open(msg.mediaUrl, '_blank')}>Ver anexo</div>}
-                    <div className="text-[9px] opacity-40 text-right mt-1.5 font-bold">
+                    <div className="text-[9px] opacity-40 text-right mt-1.5 font-bold uppercase tracking-tighter">
                       {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                      {msg.isMe && <span className="ml-1 text-blue-500">✓✓</span>}
                     </div>
                   </div>
                 ))}
@@ -213,13 +249,13 @@ const Inbox: React.FC = () => {
                     value={replyText} 
                     onChange={e => setReplyText(e.target.value)} 
                     onKeyPress={e => e.key === 'Enter' && handleSendReply()}
-                    placeholder="Responda aqui..." 
+                    placeholder="Escreva sua resposta..." 
                     className="flex-1 bg-slate-50 border-0 rounded-full px-5 py-3 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" 
                   />
                   <button 
                     onClick={handleSendReply} 
                     disabled={!replyText.trim() || isSendingReply} 
-                    className="w-11 h-11 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-lg disabled:opacity-50"
+                    className="w-11 h-11 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-lg active:scale-95 disabled:opacity-50 transition-transform"
                   >
                     {isSendingReply ? '...' : '✈️'}
                   </button>
@@ -227,9 +263,9 @@ const Inbox: React.FC = () => {
               </div>
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10 text-center opacity-30">
-              <div className="text-6xl mb-4">📥</div>
-              <p className="font-bold uppercase tracking-widest text-[10px]">Selecione uma conversa</p>
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10 text-center opacity-40">
+              <div className="text-6xl mb-4">💬</div>
+              <p className="font-bold uppercase tracking-widest text-[10px]">Clique em uma conversa para ler</p>
             </div>
           )}
         </div>
