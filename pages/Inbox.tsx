@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { IncomingMessage, Contact } from '../types';
 import { sendWhatsAppMessage } from '../services/whatsappService';
@@ -9,6 +10,7 @@ const Inbox: React.FC = () => {
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [lastSync, setLastSync] = useState('--:--');
   const [status, setStatus] = useState<'online' | 'offline' | 'loading'>('loading');
+  const [errorLog, setErrorLog] = useState<string>('');
   
   const [savedContacts, setSavedContacts] = useState<Contact[]>([]);
   
@@ -16,14 +18,12 @@ const Inbox: React.FC = () => {
   const isMounted = useRef(true);
   const syncTimerRef = useRef<any>(null);
 
-  // Auto-scroll para a última mensagem
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [selectedChat, messages]);
 
-  // Carregamento inicial e Polling
   useEffect(() => {
     isMounted.current = true;
     
@@ -42,7 +42,7 @@ const Inbox: React.FC = () => {
       if (!isMounted.current) return;
       await fetchFromBridge();
       if (isMounted.current) {
-        syncTimerRef.current = setTimeout(startPolling, 5000); // Tenta a cada 5 segundos
+        syncTimerRef.current = setTimeout(startPolling, 5000); 
       }
     };
 
@@ -58,78 +58,95 @@ const Inbox: React.FC = () => {
     const configRaw = localStorage.getItem('wb_sender_config');
     if (!configRaw) {
       setStatus('offline');
+      setErrorLog('Configure a URL da Ponte nas Configurações.');
       return;
     }
     
     const config = JSON.parse(configRaw);
     if (!config.bridgeUrl) {
       setStatus('offline');
+      setErrorLog('URL da Ponte não definida.');
       return;
     }
 
     let url = config.bridgeUrl.trim();
     if (!url.startsWith('http')) url = 'https://' + url;
-    const finalUrl = url.endsWith('/messages') ? url : `${url.replace(/\/$/, '')}/messages`;
+    // Garante que a URL termina em /messages para buscar os dados
+    const baseUrl = url.replace(/\/$/, '');
+    const finalUrl = baseUrl.includes('/messages') ? baseUrl : `${baseUrl}/messages`;
 
     try {
-      const response = await fetch(`${finalUrl}?nocache=${Date.now()}`);
-      if (!response.ok) throw new Error("Server error");
+      const response = await fetch(`${finalUrl}?t=${Date.now()}`, {
+        headers: { 'Cache-Control': 'no-cache', 'Accept': 'application/json' }
+      });
+      
+      if (!response.ok) throw new Error(`Erro do Servidor: ${response.status}`);
       
       const data = await response.json();
       setStatus('online');
-      setLastSync(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      setErrorLog('');
+      setLastSync(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 
-      // Processamento de dados (Suporta array direto ou objeto Meta)
+      // EXTRATOR UNIVERSAL: Tenta encontrar as mensagens em qualquer formato de JSON
       let rawMessages: any[] = [];
+      
       if (Array.isArray(data)) {
         rawMessages = data;
+      } else if (data.messages && Array.isArray(data.messages)) {
+        rawMessages = data.messages;
+      } else if (data.data && Array.isArray(data.data)) {
+        rawMessages = data.data;
       } else if (data.entry?.[0]?.changes?.[0]?.value?.messages) {
         rawMessages = data.entry[0].changes[0].value.messages;
-      } else if (data.messages) {
-        rawMessages = data.messages;
       }
 
       if (rawMessages.length > 0) {
         handleIncomingData(rawMessages);
       }
-    } catch (err) {
-      console.error("Erro sync:", err);
+    } catch (err: any) {
+      console.error("Erro na Ponte:", err);
       setStatus('offline');
+      setErrorLog(err.message || 'Falha de conexão com o Render.');
     }
   };
 
   const handleIncomingData = (rawList: any[]) => {
-    // Fix: Explicitly type return as IncomingMessage to fix type mismatch and mediaUrl property missing during filter
     const formatted: IncomingMessage[] = rawList.map((m: any): IncomingMessage => {
-      const phone = (m.from || m.remoteJid || '').split('@')[0].replace(/\D/g, '');
+      // Extrai o telefone do remetente (suporta Meta e Baileys)
+      const rawFrom = m.from || m.remoteJid || m.key?.remoteJid || '';
+      const phone = rawFrom.split('@')[0].replace(/\D/g, '');
       
+      // Extrai o texto (suporta múltiplos formatos de API)
       let body = '';
-      if (m.text?.body) body = m.text.body;
+      if (typeof m.text === 'string') body = m.text;
+      else if (m.text?.body) body = m.text.body;
       else if (m.message?.conversation) body = m.message.conversation;
+      else if (m.message?.extendedTextMessage?.text) body = m.message.extendedTextMessage.text;
       else if (m.body) body = m.body;
-      else if (typeof m.text === 'string') body = m.text;
 
       return {
-        id: m.id || m.key?.id || `msg-${Date.now()}-${Math.random()}`,
+        id: m.id || m.key?.id || `msg-${phone}-${Date.now()}-${Math.random()}`,
         from: phone,
-        fromName: m.pushName || m.name || '',
+        fromName: m.pushName || m.name || m.fromName || '',
         text: body.trim(),
-        timestamp: m.timestamp || new Date().toISOString(),
+        timestamp: m.timestamp || m.messageTimestamp || new Date().toISOString(),
         unread: true,
         isMe: !!m.isMe || !!m.key?.fromMe,
-        type: 'text',
-        mediaUrl: m.mediaUrl || m.url || undefined
+        type: 'text'
       };
     }).filter(m => m.from && (m.text || m.mediaUrl));
 
     const currentLocal: IncomingMessage[] = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
     const existingIds = new Set(currentLocal.map(m => m.id));
+    
     const newOnes = formatted.filter(m => !existingIds.has(m.id));
 
     if (newOnes.length > 0) {
-      const updated = [...currentLocal, ...newOnes].sort((a, b) => 
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      );
+      const updated = [...currentLocal, ...newOnes].sort((a, b) => {
+        const timeA = isNaN(Number(a.timestamp)) ? new Date(a.timestamp).getTime() : Number(a.timestamp) * 1000;
+        const timeB = isNaN(Number(b.timestamp)) ? new Date(b.timestamp).getTime() : Number(b.timestamp) * 1000;
+        return timeA - timeB;
+      });
       setMessages(updated);
       localStorage.setItem('wb_incoming', JSON.stringify(updated));
     }
@@ -181,20 +198,24 @@ const Inbox: React.FC = () => {
   const sortedChats = Object.keys(chatGroups).sort((a, b) => {
     const lastA = chatGroups[a][chatGroups[a].length - 1].timestamp;
     const lastB = chatGroups[b][chatGroups[b].length - 1].timestamp;
-    return new Date(lastB).getTime() - new Date(lastA).getTime();
+    const tA = isNaN(Number(lastA)) ? new Date(lastA).getTime() : Number(lastA) * 1000;
+    const tB = isNaN(Number(lastB)) ? new Date(lastB).getTime() : Number(lastB) * 1000;
+    return tB - tA;
   });
 
   return (
     <div className="bg-white rounded-none md:rounded-2xl border-0 md:border border-slate-200 shadow-sm overflow-hidden h-screen md:h-[calc(100vh-200px)] flex flex-col">
       {/* Status Bar */}
       <div className={`px-4 py-2 flex justify-between items-center text-[10px] text-white font-bold transition-colors ${status === 'online' ? 'bg-[#0b141a]' : 'bg-rose-600'}`}>
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-white'}`}></div>
-          <span className="uppercase tracking-widest">{status === 'online' ? 'Sistema Conectado' : 'Aguardando Ponte no Render'}</span>
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className={`w-2 h-2 shrink-0 rounded-full ${status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-white'}`}></div>
+          <span className="uppercase tracking-widest truncate">
+            {status === 'online' ? 'Conectado ao Render' : `Erro: ${errorLog || 'Desconectado'}`}
+          </span>
         </div>
-        <div className="flex gap-4">
-          <span>Último Sync: {lastSync}</span>
-          <button onClick={() => { if(confirm("Apagar histórico da tela?")) { localStorage.removeItem('wb_incoming'); setMessages([]); setSelectedChat(null); } }} className="text-rose-300">Limpar</button>
+        <div className="flex gap-4 shrink-0">
+          <span className="hidden sm:inline">SYNC: {lastSync}</span>
+          <button onClick={() => { if(confirm("Limpar mensagens da tela?")) { localStorage.removeItem('wb_incoming'); setMessages([]); setSelectedChat(null); } }} className="text-rose-300">Limpar</button>
         </div>
       </div>
 
@@ -204,19 +225,22 @@ const Inbox: React.FC = () => {
           {sortedChats.length === 0 ? (
             <div className="p-12 text-center opacity-30 mt-10">
               <div className="text-5xl mb-4">📥</div>
-              <p className="text-[10px] font-black uppercase">Nenhuma conversa</p>
+              <p className="text-[10px] font-black uppercase mb-1">Caixa Vazia</p>
+              <p className="text-[8px] leading-relaxed">Aguardando mensagens via Webhook...</p>
             </div>
           ) : (
             sortedChats.map(phone => {
               const last = chatGroups[phone][chatGroups[phone].length - 1];
               const isSelected = selectedChat === phone;
+              const time = isNaN(Number(last.timestamp)) ? new Date(last.timestamp) : new Date(Number(last.timestamp) * 1000);
+              
               return (
                 <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left border-b border-slate-50 transition-all ${isSelected ? 'bg-emerald-50 border-r-4 border-r-emerald-500' : 'hover:bg-slate-50'}`}>
-                  <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-400 shrink-0 text-xl">👤</div>
+                  <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-400 shrink-0 text-xl border border-slate-200">👤</div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center">
                       <p className="font-bold text-slate-800 text-sm truncate">{getDisplayName(phone)}</p>
-                      <span className="text-[9px] text-slate-400">{new Date(last.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                      <span className="text-[9px] text-slate-400">{time.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                     </div>
                     <p className="text-xs text-slate-500 truncate mt-0.5">{last.text}</p>
                   </div>
@@ -240,17 +264,20 @@ const Inbox: React.FC = () => {
               </div>
 
               <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto space-y-3 flex flex-col bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat">
-                {chatGroups[selectedChat].map((msg: any) => (
-                  <div key={msg.id} className={`max-w-[85%] p-3 rounded-xl shadow-sm text-sm ${
-                    msg.isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-                  }`}>
-                    <p className="whitespace-pre-wrap text-slate-800 leading-relaxed font-medium">{msg.text}</p>
-                    <div className="text-[9px] opacity-40 text-right mt-1.5 font-bold uppercase tracking-tight">
-                      {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                      {msg.isMe && <span className="ml-1 text-blue-500">✓✓</span>}
+                {chatGroups[selectedChat].map((msg: any) => {
+                  const time = isNaN(Number(msg.timestamp)) ? new Date(msg.timestamp) : new Date(Number(msg.timestamp) * 1000);
+                  return (
+                    <div key={msg.id} className={`max-w-[85%] p-3 rounded-xl shadow-sm text-sm ${
+                      msg.isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+                    }`}>
+                      <p className="whitespace-pre-wrap text-slate-800 leading-relaxed font-medium">{msg.text}</p>
+                      <div className="text-[9px] opacity-40 text-right mt-1.5 font-bold uppercase tracking-tight">
+                        {time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        {msg.isMe && <span className="ml-1 text-blue-500">✓✓</span>}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="p-4 bg-[#f0f2f5] border-t border-slate-200">
@@ -265,7 +292,8 @@ const Inbox: React.FC = () => {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10 text-center opacity-40">
               <div className="text-8xl mb-6">💬</div>
-              <h3 className="font-black uppercase tracking-widest text-xs">Selecione uma conversa</h3>
+              <h3 className="font-black uppercase tracking-widest text-xs">WhatsApp Inbox Ativo</h3>
+              <p className="text-[10px] mt-2">Mensagens aparecerão aqui automaticamente.</p>
             </div>
           )}
         </div>
