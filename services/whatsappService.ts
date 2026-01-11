@@ -19,9 +19,13 @@ export const sendWhatsAppMessage = async (
   options?: SendMessageOptions
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    // Saneamento: Meta REJEITA o caractere "+" ou espaços
-    const cleanTo = to.replace(/\D/g, '');
+    // Saneamento EXTREMO: Meta REJEITA qualquer coisa que não seja dígito
+    const cleanTo = String(to).replace(/\D/g, '');
     
+    if (!cleanTo || cleanTo.length < 8) {
+      return { success: false, error: 'Número de telefone inválido (deve conter apenas números e código do país)' };
+    }
+
     const isTemplate = !!options?.templateName;
     const isMedia = !!options?.mediaUrl && !!options?.mediaType;
     
@@ -47,7 +51,8 @@ export const sendWhatsAppMessage = async (
       };
     } else {
       body.type = "text";
-      body.text = { body: text || ' ' };
+      // Meta API exige que 'body' não seja vazio
+      body.text = { body: (text || ' ').trim() || ' ' };
     }
 
     const response = await fetch(`https://graph.facebook.com/v21.0/${config.phoneId}/messages`, {
@@ -64,12 +69,14 @@ export const sendWhatsAppMessage = async (
     if (response.ok) {
       return { success: true };
     } else {
+      console.error('Meta API Error:', data);
       return { 
         success: false, 
-        error: data.error?.message || 'Erro na API da Meta' 
+        error: data.error?.message || `Erro API #${data.error?.code || 'Desconhecido'}` 
       };
     }
   } catch (err) {
-    return { success: false, error: 'Erro de conexão com a Meta' };
+    console.error('Connection Error:', err);
+    return { success: false, error: 'Erro de conexão com a Meta. Verifique sua internet.' };
   }
 };
