@@ -16,7 +16,6 @@ const MobileRedirectHandler: React.FC<{ children: React.ReactNode }> = ({ childr
 
   useEffect(() => {
     const checkMobile = () => {
-      // Se largura for menor que 768px e não estiver no inbox, redireciona
       if (window.innerWidth < 768 && location.pathname !== '/inbox') {
         navigate('/inbox');
       }
@@ -109,19 +108,14 @@ const Contacts = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem('wb_contacts');
-    if (saved) setContacts(JSON.parse(saved));
+    const load = () => {
+      const saved = localStorage.getItem('wb_contacts');
+      if (saved) setContacts(JSON.parse(saved));
+    };
+    load();
+    window.addEventListener('storage', load);
+    return () => window.removeEventListener('storage', load);
   }, []);
-
-  const isClientContact = (name: string): boolean => {
-    return name.toLowerCase().trim().startsWith('cliente');
-  };
-
-  const formatContactName = (rawName: string): string => {
-    if (!rawName) return 'cliente';
-    const clean = rawName.replace(/^cliente\s+/i, '').trim();
-    return `cliente ${clean.toLowerCase()}`;
-  };
 
   const saveContacts = (newList: Contact[]) => {
     const uniqueMap = new Map();
@@ -134,6 +128,7 @@ const Contacts = () => {
     setContacts(deduped);
     localStorage.setItem('wb_contacts', JSON.stringify(deduped));
     setSelectedIds(new Set());
+    window.dispatchEvent(new Event('storage'));
     return deduped.length;
   };
 
@@ -179,11 +174,9 @@ const Contacts = () => {
       // @ts-ignore
       const results = await navigator.contacts.select(['name', 'tel'], { multiple: true });
       if (results?.length > 0) {
-        const imported = results
-          .filter((res: any) => isClientContact(res.name?.[0] || ''))
-          .map((res: any) => ({
+        const imported = results.map((res: any) => ({
             id: crypto.randomUUID(),
-            name: formatContactName(res.name?.[0]),
+            name: res.name?.[0] || 'Contato Importado',
             phone: formatPhoneForAPI(res.tel?.[0] || ''),
             group: 'Agenda Celular'
           })).filter((c: Contact) => c.phone.length >= 12);
@@ -209,12 +202,12 @@ const Contacts = () => {
         cards.forEach(card => {
           const nameMatch = card.match(/FN:(.*)/);
           const telMatch = card.match(/TEL.*:(.*)/);
-          const rawName = nameMatch ? nameMatch[1].trim() : '';
+          const rawName = nameMatch ? nameMatch[1].trim() : 'Contato VCF';
           
-          if (telMatch && isClientContact(rawName)) {
+          if (telMatch) {
             newContacts.push({
               id: crypto.randomUUID(),
-              name: formatContactName(rawName),
+              name: rawName,
               phone: formatPhoneForAPI(telMatch[1]),
               group: 'Arquivo VCF'
             });
@@ -226,14 +219,12 @@ const Contacts = () => {
           const parts = line.split(/[,;]/);
           if (parts.length >= 2) {
             const rawName = parts[0].trim().replace(/"/g, '');
-            if (isClientContact(rawName)) {
-              newContacts.push({
-                id: crypto.randomUUID(),
-                name: formatContactName(rawName),
-                phone: formatPhoneForAPI(parts[1]),
-                group: 'Arquivo CSV'
-              });
-            }
+            newContacts.push({
+              id: crypto.randomUUID(),
+              name: rawName,
+              phone: formatPhoneForAPI(parts[1]),
+              group: 'Arquivo CSV'
+            });
           }
         });
       }
@@ -290,8 +281,8 @@ const Contacts = () => {
     <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Meus Contatos</h2>
-          <p className="text-sm text-slate-500">Regra: apenas contatos que iniciam com "cliente".</p>
+          <h2 className="text-xl font-bold text-slate-800">Minha Agenda</h2>
+          <p className="text-sm text-slate-500">Contatos manuais e leads capturados pelo chat.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {selectedIds.size > 0 && (
@@ -322,12 +313,13 @@ const Contacts = () => {
               </th>
               <th className="pb-4 text-xs font-bold text-slate-400 uppercase">Nome</th>
               <th className="pb-4 text-xs font-bold text-slate-400 uppercase">WhatsApp</th>
+              <th className="pb-4 text-xs font-bold text-slate-400 uppercase">Origem</th>
               <th className="pb-4 text-xs font-bold text-slate-400 uppercase text-right">Ação</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {contacts.length === 0 ? (
-              <tr><td colSpan={4} className="py-20 text-center text-slate-400 italic">Nenhum contato encontrado.</td></tr>
+              <tr><td colSpan={5} className="py-20 text-center text-slate-400 italic">Nenhum contato encontrado.</td></tr>
             ) : (
               contacts.map(c => (
                 <tr key={c.id} className={`hover:bg-slate-50/80 transition-colors ${selectedIds.has(c.id) ? 'bg-emerald-50/30' : ''}`}>
@@ -339,8 +331,15 @@ const Contacts = () => {
                       onChange={() => toggleSelect(c.id)}
                     />
                   </td>
-                  <td className="py-4 text-sm font-semibold text-slate-700">{c.name}</td>
+                  <td className="py-4">
+                    <p className="text-sm font-semibold text-slate-700">{c.name}</p>
+                  </td>
                   <td className="py-4 text-sm text-emerald-600 font-mono">+{c.phone}</td>
+                  <td className="py-4">
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${c.group.includes('Chat') ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 text-slate-500'}`}>
+                      {c.group}
+                    </span>
+                  </td>
                   <td className="py-4 text-right">
                     <button 
                       disabled={!!testingId} 
@@ -363,17 +362,15 @@ const Contacts = () => {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-sm p-6 border border-slate-200 shadow-2xl">
             <h3 className="text-lg font-bold text-slate-800 mb-4">Adicionar Manual</h3>
-            <p className="text-[10px] text-slate-400 mb-4 uppercase font-bold italic">* Nome deve começar com "cliente"</p>
             <form onSubmit={(e) => {
               e.preventDefault();
-              if (!isClientContact(newName)) return alert("O nome deve começar com 'cliente'.");
               const formatted = formatPhoneForAPI(newPhone);
               if (formatted.length < 12) return alert("Número inválido.");
-              saveContacts([{ id: crypto.randomUUID(), name: formatContactName(newName), phone: formatted, group: 'Manual' }, ...contacts]);
+              saveContacts([{ id: crypto.randomUUID(), name: newName, phone: formatted, group: 'Manual' }, ...contacts]);
               setNewName(''); setNewPhone(''); setIsModalOpen(false);
             }} className="space-y-4">
-              <input required type="text" placeholder="Ex: cliente Jonatas" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" />
-              <input required type="text" placeholder="DDD + Número" value={newPhone} onChange={e => setNewPhone(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" />
+              <input required type="text" placeholder="Nome do Contato" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" />
+              <input required type="text" placeholder="DDD + Número (ex: 11999998888)" value={newPhone} onChange={e => setNewPhone(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" />
               <div className="flex gap-2">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-3 text-slate-500 font-bold">Cancelar</button>
                 <button type="submit" className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-100">Salvar</button>

@@ -33,25 +33,28 @@ const Inbox: React.FC = () => {
   }, []);
 
   const autoSaveContact = (phone: string, profileName?: string) => {
-    if (!profileName || profileName.toLowerCase().trim() !== 'cliente') {
-      console.log(`[SISTEMA] Contato ${phone} (${profileName || 'Sem Nome'}) ignorado pela regra de captura.`);
-      return;
-    }
-
     const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
     const exists = contacts.find(c => c.phone === phone);
     
     if (!exists) {
+      // Se não tem nome no perfil, usa um padrão, mas prioriza o nome vindo do WhatsApp
+      const finalName = profileName && profileName.trim() !== "" 
+        ? profileName 
+        : `Novo Contato ${phone.slice(-4)}`;
+
       const newContact: Contact = {
         id: crypto.randomUUID(),
-        name: `Lead Cliente ${phone.slice(-4)}`,
+        name: finalName,
         phone: phone,
         group: 'Capturado via Chat'
       };
       const updated = [newContact, ...contacts];
       localStorage.setItem('wb_contacts', JSON.stringify(updated));
       setSavedContacts(updated);
-      console.log(`[SISTEMA] Novo lead "cliente" capturado: ${phone}`);
+      setDebugLog(`Lead salvo: ${finalName}`);
+      
+      // Dispara evento para atualizar outras partes do app que usem contatos
+      window.dispatchEvent(new Event('storage'));
     }
   };
 
@@ -74,7 +77,10 @@ const Inbox: React.FC = () => {
     const processedIds = JSON.parse(localStorage.getItem('wb_processed_ids') || '[]');
     if (processedIds.includes(newMsg.id)) return;
 
-    if (!newMsg.isMe) autoSaveContact(newMsg.from, newMsg.fromName);
+    // Salva o contato automaticamente se for mensagem recebida
+    if (!newMsg.isMe) {
+      autoSaveContact(newMsg.from, newMsg.fromName);
+    }
 
     const autoSettingsRaw = localStorage.getItem('wb_automation_settings');
     if (!autoSettingsRaw) return;
@@ -154,9 +160,9 @@ const Inbox: React.FC = () => {
           const stableId = m.id || `${m.from}-${m.timestamp}`;
           return {
             id: stableId,
-            from: m.from || m.de || 'Sistema',
-            fromName: m.name || m.fromName || m.pushName || undefined,
-            text: m.text || m.texto || 'Mensagem recebida',
+            from: String(m.from || m.de || m.telefone || '').replace(/\D/g, ''),
+            fromName: m.name || m.fromName || m.pushName || m.pushname || undefined,
+            text: m.text || m.texto || m.body || 'Mensagem recebida',
             timestamp: m.timestamp || new Date().toISOString(),
             unread: m.unread !== undefined ? m.unread : true,
             isMe: m.isMe || false
@@ -254,7 +260,7 @@ const Inbox: React.FC = () => {
   };
 
   const isContactSaved = (phone: string) => {
-    return savedContacts.some(c => c.phone === phone && !c.name.startsWith('Lead '));
+    return savedContacts.some(c => c.phone === phone && !c.group.includes('Capturado'));
   };
 
   return (
@@ -274,7 +280,6 @@ const Inbox: React.FC = () => {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar de Chats - Ocultar no mobile quando um chat estiver aberto para ganhar espaço */}
         <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-slate-100 flex-col bg-white overflow-y-auto`}>
           {sortedChats.length === 0 ? (
             <div className="p-10 text-center opacity-20 mt-10">
@@ -284,8 +289,8 @@ const Inbox: React.FC = () => {
           ) : (
             sortedChats.map(phone => (
               <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left hover:bg-slate-50 border-b border-slate-50 transition-colors ${selectedChat === phone ? 'bg-emerald-50/50' : ''}`}>
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs ${isContactSaved(phone) ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500'}`}>
-                  {isContactSaved(phone) ? '👤' : '💡'}
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs ${isContactSaved(phone) ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                  {isContactSaved(phone) ? '👤' : '⚡'}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline">
@@ -299,13 +304,11 @@ const Inbox: React.FC = () => {
           )}
         </div>
 
-        {/* Área do Chat */}
         <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#efeae2] relative shadow-inner`}>
           {selectedChat ? (
             <>
               <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center z-10 shadow-sm">
                 <div className="flex items-center gap-3">
-                  {/* Botão Voltar no Mobile */}
                   <button onClick={() => setSelectedChat(null)} className="md:hidden text-slate-400 p-1">←</button>
                   <div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center font-bold text-[10px]">👤</div>
                   <div>
