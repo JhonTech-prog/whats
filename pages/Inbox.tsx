@@ -34,28 +34,38 @@ const Inbox: React.FC = () => {
 
   const autoSaveContact = (phone: string, profileName?: string) => {
     const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
-    const exists = contacts.find(c => c.phone === phone);
+    const index = contacts.findIndex(c => c.phone === phone);
     
-    // Se o contato não existe na agenda, salvamos agora
-    if (!exists) {
-      // Formata o nome como "Cliente [Nome]" conforme solicitado
-      const rawName = profileName && profileName.trim() !== "" ? profileName : phone.slice(-4);
-      const finalName = `Cliente ${rawName}`;
+    const hasRealName = profileName && profileName.trim() !== "";
+    const nameFromProfile = hasRealName ? profileName!.trim() : null;
+    const finalName = nameFromProfile ? `Cliente ${nameFromProfile}` : `Cliente ${phone.slice(-4)}`;
 
+    if (index === -1) {
+      // Novo contato: Criar do zero
       const newContact: Contact = {
         id: crypto.randomUUID(),
         name: finalName,
         phone: phone,
         group: 'Capturado via Chat'
       };
-      
       const updated = [newContact, ...contacts];
       localStorage.setItem('wb_contacts', JSON.stringify(updated));
       setSavedContacts(updated);
       setDebugLog(`Novo lead: ${finalName}`);
-      
-      // Notifica o restante do app
       window.dispatchEvent(new Event('storage'));
+    } else {
+      // Contato já existe: Verificar se precisamos atualizar o nome
+      const existing = contacts[index];
+      // Se o nome atual for genérico (apenas os 4 digitos) e agora temos um nome real, atualizamos
+      const isGeneric = existing.name.includes(phone.slice(-4)) || existing.name.startsWith('Novo Contato');
+      
+      if (isGeneric && nameFromProfile) {
+        contacts[index].name = finalName;
+        localStorage.setItem('wb_contacts', JSON.stringify(contacts));
+        setSavedContacts([...contacts]);
+        setDebugLog(`Nome atualizado: ${finalName}`);
+        window.dispatchEvent(new Event('storage'));
+      }
     }
   };
 
@@ -63,7 +73,7 @@ const Inbox: React.FC = () => {
     const processedIds = JSON.parse(localStorage.getItem('wb_processed_ids') || '[]');
     if (processedIds.includes(newMsg.id)) return;
 
-    // CAPTURA AUTOMÁTICA: Salva o contato assim que a mensagem chega
+    // CAPTURA AUTOMÁTICA: Salva ou atualiza o contato assim que a mensagem chega
     if (!newMsg.isMe) {
       autoSaveContact(newMsg.from, newMsg.fromName);
     }
@@ -147,8 +157,8 @@ const Inbox: React.FC = () => {
           return {
             id: stableId,
             from: String(m.from || m.de || m.telefone || '').replace(/\D/g, ''),
-            // Mapeamento expandido para pegar nome de diversas fontes da API/Bridge
-            fromName: m.push_name || m.pushName || m.nome || m.name || m.fromName || undefined,
+            // Mapeamento extra-robusto para pegar o nome de perfil da Meta/Bridge
+            fromName: m.push_name || m.pushName || m.pushname || m.nome || m.name || m.senderName || m.sender_name || m.fromName || undefined,
             text: m.text || m.texto || m.body || 'Mensagem recebida',
             timestamp: m.timestamp || new Date().toISOString(),
             unread: m.unread !== undefined ? m.unread : true,
@@ -247,7 +257,7 @@ const Inbox: React.FC = () => {
   };
 
   const isContactSaved = (phone: string) => {
-    // Consideramos salvo apenas se for manual ou agenda, não os capturados genéricos sem nome real
+    // Identifica se o contato tem um nome real capturado (não apenas os últimos 4 dígitos)
     const contact = savedContacts.find(c => c.phone === phone);
     return contact && !contact.name.includes(phone.slice(-4));
   };
