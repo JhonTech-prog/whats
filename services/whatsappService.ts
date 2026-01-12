@@ -11,7 +11,7 @@ export interface SendMessageOptions {
 
 /**
  * Envia uma mensagem via API do WhatsApp Business (Meta)
- * Versão simplificada e estável.
+ * Limpa rigorosamente o número para conter apenas dígitos e garante o prefixo internacional.
  */
 export const sendWhatsAppMessage = async (
   to: string,
@@ -20,15 +20,21 @@ export const sendWhatsAppMessage = async (
   options?: SendMessageOptions
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    // Limpeza básica: remove tudo que não é número
-    const cleanTo = String(to).replace(/\D/g, '');
+    // 1. LIMPEZA TOTAL: Remove TUDO que não for dígito (essencial para evitar erro 131009)
+    let cleanTo = String(to).replace(/\D/g, '');
     
-    if (!cleanTo || cleanTo.length < 8) {
-      return { success: false, error: "Número inválido." };
+    // 2. CORREÇÃO AUTOMÁTICA DDI: Se for número do Brasil sem o 55, adiciona.
+    // Números brasileiros tem 10 (fixo) ou 11 (celular) dígitos sem o DDI.
+    if (cleanTo.length >= 10 && cleanTo.length <= 11 && !cleanTo.startsWith('55')) {
+      cleanTo = '55' + cleanTo;
+    }
+
+    if (!cleanTo || cleanTo.length < 10) {
+      return { success: false, error: "Número de destino inválido ou incompleto." };
     }
 
     if (!config.accessToken || !config.phoneId) {
-      return { success: false, error: "Configurações da Meta ausentes." };
+      return { success: false, error: "Credenciais da Meta (Token/Phone ID) não configuradas." };
     }
 
     const isTemplate = !!options?.templateName;
@@ -45,8 +51,9 @@ export const sendWhatsAppMessage = async (
         language: { code: options.languageCode || "pt_BR" }
       };
     } else {
+      // Texto simples. O corpo não pode ser vazio.
       body.type = "text";
-      body.text = { body: text.trim() || "." };
+      body.text = { body: (text || "").trim() || "Mensagem automática" };
     }
 
     const response = await fetch(`https://graph.facebook.com/v21.0/${config.phoneId}/messages`, {
@@ -63,12 +70,12 @@ export const sendWhatsAppMessage = async (
     if (response.ok) {
       return { success: true };
     } else {
-      return { 
-        success: false, 
-        error: data.error?.message || "Erro na API da Meta" 
-      };
+      console.error('Meta API Error Details:', data);
+      const msg = data.error?.message || 'Erro desconhecido na API da Meta';
+      const code = data.error?.code || 'N/A';
+      return { success: false, error: `Erro Meta #${code}: ${msg}` };
     }
   } catch (err) {
-    return { success: false, error: "Falha de conexão." };
+    return { success: false, error: "Falha na conexão com os servidores da Meta." };
   }
 };
