@@ -9,6 +9,10 @@ export interface SendMessageOptions {
   languageCode?: string;
 }
 
+/**
+ * Envia uma mensagem via API do WhatsApp Business (Meta)
+ * Esta versão foca na simplicidade que funcionava anteriormente.
+ */
 export const sendWhatsAppMessage = async (
   to: string,
   text: string,
@@ -16,18 +20,20 @@ export const sendWhatsAppMessage = async (
   options?: SendMessageOptions
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    // LIMPEZA ABSOLUTA: A Meta só aceita strings contendo APENAS dígitos.
+    // 1. Limpeza TOTAL: A Meta exige apenas dígitos no campo 'to'
     const cleanTo = String(to).replace(/\D/g, '');
     
-    if (!cleanTo || cleanTo.length < 10) {
-      return { success: false, error: "Número de destino inválido ou incompleto." };
+    if (!cleanTo || cleanTo.length < 8) {
+      return { success: false, error: "O número de destino está vazio ou é inválido." };
     }
 
     if (!config.accessToken || !config.phoneId) {
-      return { success: false, error: "Credenciais da Meta não configuradas." };
+      return { success: false, error: "Configurações ausentes: Phone ID ou Token." };
     }
 
     const isTemplate = !!options?.templateName;
+    
+    // 2. Montagem do corpo da requisição (Versão padrão Meta)
     const body: any = {
       messaging_product: "whatsapp",
       recipient_type: "individual",
@@ -42,9 +48,12 @@ export const sendWhatsAppMessage = async (
       };
     } else {
       body.type = "text";
-      body.text = { body: text.trim() };
+      body.text = { 
+        body: (text || "").trim() || "." // Meta rejeita corpos vazios
+      };
     }
 
+    // 3. Chamada para a API (Versão estável v21.0)
     const response = await fetch(`https://graph.facebook.com/v21.0/${config.phoneId}/messages`, {
       method: 'POST',
       headers: {
@@ -59,12 +68,12 @@ export const sendWhatsAppMessage = async (
     if (response.ok) {
       return { success: true };
     } else {
-      return { 
-        success: false, 
-        error: `Erro Meta #${data.error?.code}: ${data.error?.message}` 
-      };
+      console.error('Meta API Error:', data);
+      const msg = data.error?.message || 'Erro desconhecido';
+      const code = data.error?.code;
+      return { success: false, error: `Erro #${code}: ${msg}` };
     }
   } catch (err) {
-    return { success: false, error: "Falha na conexão com a API da Meta." };
+    return { success: false, error: "Erro de conexão com os servidores da Meta." };
   }
 };
