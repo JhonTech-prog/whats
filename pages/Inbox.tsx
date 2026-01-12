@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { IncomingMessage, AutomationSettings, Contact } from '../types';
-import { sendWhatsAppMessage } from '../services/whatsappService';
+import { IncomingMessage, AutomationSettings, Contact, MessageType } from '../types';
+import { sendWhatsAppMessage, sendWhatsAppMedia } from '../services/whatsappService';
 
 const Inbox: React.FC = () => {
   const [messages, setMessages] = useState<IncomingMessage[]>([]);
@@ -14,6 +14,7 @@ const Inbox: React.FC = () => {
   
   const pollingRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -41,7 +42,6 @@ const Inbox: React.FC = () => {
     const finalName = nameFromProfile ? `Cliente ${nameFromProfile}` : `Cliente ${phone.slice(-4)}`;
 
     if (index === -1) {
-      // Novo contato: Criar do zero
       const newContact: Contact = {
         id: crypto.randomUUID(),
         name: finalName,
@@ -54,11 +54,8 @@ const Inbox: React.FC = () => {
       setDebugLog(`Novo lead: ${finalName}`);
       window.dispatchEvent(new Event('storage'));
     } else {
-      // Contato já existe: Verificar se precisamos atualizar o nome
       const existing = contacts[index];
-      // Se o nome atual for genérico (apenas os 4 digitos) e agora temos um nome real, atualizamos
       const isGeneric = existing.name.includes(phone.slice(-4)) || existing.name.startsWith('Novo Contato');
-      
       if (isGeneric && nameFromProfile) {
         contacts[index].name = finalName;
         localStorage.setItem('wb_contacts', JSON.stringify(contacts));
@@ -73,7 +70,6 @@ const Inbox: React.FC = () => {
     const processedIds = JSON.parse(localStorage.getItem('wb_processed_ids') || '[]');
     if (processedIds.includes(newMsg.id)) return;
 
-    // CAPTURA AUTOMÁTICA: Salva ou atualiza o contato assim que a mensagem chega
     if (!newMsg.isMe) {
       autoSaveContact(newMsg.from, newMsg.fromName);
     }
@@ -88,7 +84,7 @@ const Inbox: React.FC = () => {
 
     let responseToSend = "";
 
-    if (settings.keywords.enabled) {
+    if (settings.keywords.enabled && newMsg.type === 'text') {
       const cleanText = newMsg.text.toLowerCase().trim();
       const rule = settings.keywords.rules.find(r => 
         r.trigger && cleanText.includes(r.trigger.toLowerCase().trim())
@@ -125,7 +121,8 @@ const Inbox: React.FC = () => {
           text: responseToSend,
           timestamp: new Date().toISOString(),
           unread: false,
-          isMe: true
+          isMe: true,
+          type: 'text'
         };
         setMessages(prev => {
           const updated = [...prev, myMessage];
@@ -157,9 +154,10 @@ const Inbox: React.FC = () => {
           return {
             id: stableId,
             from: String(m.from || m.de || m.telefone || '').replace(/\D/g, ''),
-            // Mapeamento extra-robusto para pegar o nome de perfil da Meta/Bridge
             fromName: m.push_name || m.pushName || m.pushname || m.nome || m.name || m.senderName || m.sender_name || m.fromName || undefined,
-            text: m.text || m.texto || m.body || 'Mensagem recebida',
+            text: m.text || m.texto || m.body || '',
+            type: m.type || 'text',
+            mediaUrl: m.mediaUrl || m.image_url || m.audio_url || m.url || undefined,
             timestamp: m.timestamp || new Date().toISOString(),
             unread: m.unread !== undefined ? m.unread : true,
             isMe: m.isMe || false
@@ -224,7 +222,8 @@ const Inbox: React.FC = () => {
         text: replyText,
         timestamp: new Date().toISOString(),
         unread: false,
-        isMe: true
+        isMe: true,
+        type: 'text'
       };
 
       setMessages(prev => {
@@ -237,6 +236,66 @@ const Inbox: React.FC = () => {
       alert("Erro ao enviar: " + result.error);
     }
     setIsSendingReply(false);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedChat) return;
+
+    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
+    if (!config.accessToken || !config.phoneId) {
+      alert("Configure as credenciais da Meta primeiro.");
+      return;
+    }
+
+    const fileType: MessageType = file.type.startsWith('image/') ? 'image' : file.type.startsWith('audio/') ? 'audio' : 'text';
+    
+    if (fileType === 'text') {
+      alert("Apenas imagens e áudios são suportados no momento.");
+      return;
+    }
+
+    // SIMULAÇÃO: No mundo real, você faria upload do arquivo para a Meta ou para um servidor de storage
+    // e passaria a URL ou o media_id. Para fins de demonstração, vamos usar uma URL base64 local
+    // e avisar que a API da Meta requer uma URL pública ou Media ID.
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64 = event.target?.result as string;
+      
+      setIsSendingReply(true);
+      setDebugLog(`Enviando ${fileType}...`);
+
+      // NOTA: A API da Meta via link exige uma URL pública acessível. 
+      // Em produção, você faria upload do arquivo para o S3/Google Cloud e usaria o link gerado.
+      // Aqui, enviaremos um alerta sobre a necessidade de URL pública e salvaremos localmente.
+      
+      const result = await sendWhatsAppMedia(selectedChat, fileType as 'image' | 'audio', "URL_DO_ARQUIVO_PUBLICO", config);
+
+      if (result.success || confirm("O envio falhou pois requer uma URL pública, mas deseja simular o registro visual na conversa local?")) {
+        const myMessage: IncomingMessage = {
+          id: `media-${Date.now()}`,
+          from: selectedChat,
+          text: fileType === 'image' ? 'Imagem enviada' : 'Áudio enviado',
+          timestamp: new Date().toISOString(),
+          unread: false,
+          isMe: true,
+          type: fileType,
+          mediaUrl: base64
+        };
+
+        setMessages(prev => {
+          const updated = [...prev, myMessage];
+          localStorage.setItem('wb_incoming', JSON.stringify(updated));
+          return updated;
+        });
+      } else {
+        alert("Erro no envio: " + result.error);
+      }
+      setIsSendingReply(false);
+    };
+    reader.readAsDataURL(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const chatGroups = messages.reduce((acc: any, msg) => {
@@ -257,24 +316,8 @@ const Inbox: React.FC = () => {
   };
 
   const isContactSaved = (phone: string) => {
-    // Identifica se o contato tem um nome real capturado (não apenas os últimos 4 dígitos)
     const contact = savedContacts.find(c => c.phone === phone);
     return contact && !contact.name.includes(phone.slice(-4));
-  };
-
-  const exportChat = () => {
-    if (!selectedChat) return;
-    const chatMsgs = chatGroups[selectedChat];
-    const text = chatMsgs.map((m: any) => 
-      `[${new Date(m.timestamp).toLocaleString()}] ${m.isMe ? 'EU' : m.from}: ${m.text}`
-    ).join('\n');
-    
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `conversa_${selectedChat}.txt`;
-    a.click();
   };
 
   return (
@@ -311,7 +354,11 @@ const Inbox: React.FC = () => {
                     <p className="font-bold text-slate-800 text-sm truncate">{getContactName(phone)}</p>
                     {chatGroups[phone].some((m:any) => m.unread && !m.isMe) && <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>}
                   </div>
-                  <p className="text-xs text-slate-500 truncate">{chatGroups[phone][chatGroups[phone].length - 1].text}</p>
+                  <p className="text-xs text-slate-500 truncate">
+                    {chatGroups[phone][chatGroups[phone].length - 1].type === 'image' ? '📷 Foto' : 
+                     chatGroups[phone][chatGroups[phone].length - 1].type === 'audio' ? '🎤 Áudio' : 
+                     chatGroups[phone][chatGroups[phone].length - 1].text}
+                  </p>
                 </div>
               </button>
             ))
@@ -331,7 +378,6 @@ const Inbox: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  <button onClick={exportChat} className="hidden sm:inline text-[9px] font-bold text-slate-400 hover:text-indigo-500 uppercase tracking-wider">Exportar</button>
                   <button onClick={() => {
                      if(confirm("Remover conversa local?")) {
                         const updated = messages.filter(m => m.from !== selectedChat);
@@ -350,7 +396,20 @@ const Inbox: React.FC = () => {
                       ? 'bg-[#dcf8c6] border-[#c1e8a0] self-end rounded-tr-none text-slate-800' 
                       : 'bg-white border-slate-200 self-start rounded-tl-none text-slate-700'
                   }`}>
-                    <p className="whitespace-pre-wrap">{msg.text}</p>
+                    {msg.type === 'image' && msg.mediaUrl && (
+                      <div className="mb-2">
+                        <img src={msg.mediaUrl} alt="Mídia enviada" className="rounded-lg max-w-full h-auto shadow-sm cursor-pointer hover:opacity-95" onClick={() => window.open(msg.mediaUrl)} />
+                      </div>
+                    )}
+                    {msg.type === 'audio' && msg.mediaUrl && (
+                      <div className="mb-2 min-w-[200px]">
+                        <audio controls className="w-full h-8 custom-audio">
+                          <source src={msg.mediaUrl} type="audio/mpeg" />
+                          Seu navegador não suporta áudio.
+                        </audio>
+                      </div>
+                    )}
+                    {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
                     <div className="flex justify-end items-center gap-1 mt-1">
                       <p className="text-[9px] text-slate-400 opacity-70">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                       {msg.isMe && <span className="text-[10px] text-blue-500">✓✓</span>}
@@ -361,6 +420,14 @@ const Inbox: React.FC = () => {
 
               <div className="p-4 bg-white border-t border-slate-200 pb-safe">
                 <div className="flex gap-2 items-end max-w-4xl mx-auto">
+                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,audio/*" />
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Enviar Imagem ou Áudio"
+                    className="w-12 h-12 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200 transition-all shadow-sm shrink-0"
+                  >
+                    <span className="text-xl">📎</span>
+                  </button>
                   <textarea 
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
@@ -374,7 +441,7 @@ const Inbox: React.FC = () => {
                     rows={1}
                     className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none max-h-32 transition-all"
                   />
-                  <button onClick={handleSendReply} disabled={!replyText.trim() || isSendingReply} className="w-12 h-12 bg-emerald-500 text-white rounded-full flex items-center justify-center hover:bg-emerald-600 disabled:opacity-50 transition-all shadow-md active:scale-95">
+                  <button onClick={handleSendReply} disabled={!replyText.trim() || isSendingReply} className="w-12 h-12 bg-emerald-500 text-white rounded-full flex items-center justify-center hover:bg-emerald-600 disabled:opacity-50 transition-all shadow-md active:scale-95 shrink-0">
                     {isSendingReply ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <span className="text-xl">✈️</span>}
                   </button>
                 </div>
@@ -384,11 +451,16 @@ const Inbox: React.FC = () => {
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-12 text-center">
               <div className="w-24 h-24 bg-white/50 rounded-full flex items-center justify-center text-4xl mb-4 grayscale opacity-30 shadow-sm">🤖</div>
               <h3 className="font-bold text-slate-500 uppercase tracking-widest text-xs">Robô de Atendimento</h3>
-              <p className="text-[10px] mt-2 max-w-[200px]">Selecione um chat para responder.</p>
+              <p className="text-[10px] mt-2 max-w-[200px]">Selecione um chat para responder ou enviar arquivos.</p>
             </div>
           )}
         </div>
       </div>
+      <style>{`
+        .custom-audio::-webkit-media-controls-panel {
+          background-color: #f1f5f9;
+        }
+      `}</style>
     </div>
   );
 };

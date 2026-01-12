@@ -15,6 +15,8 @@ export interface Contact {
   group: string;
 }
 
+export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'document';
+
 export interface IncomingMessage {
   id: string;
   from: string;
@@ -23,6 +25,9 @@ export interface IncomingMessage {
   timestamp: string;
   unread: boolean;
   isMe?: boolean;
+  type?: MessageType;
+  mediaUrl?: string;
+  caption?: string;
 }
 
 export interface AutomationSettings {
