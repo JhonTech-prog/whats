@@ -36,11 +36,11 @@ const Inbox: React.FC = () => {
     const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
     const exists = contacts.find(c => c.phone === phone);
     
+    // Se o contato não existe na agenda, salvamos agora
     if (!exists) {
-      // Se não tem nome no perfil, usa um padrão, mas prioriza o nome vindo do WhatsApp
-      const finalName = profileName && profileName.trim() !== "" 
-        ? profileName 
-        : `Novo Contato ${phone.slice(-4)}`;
+      // Formata o nome como "Cliente [Nome]" conforme solicitado
+      const rawName = profileName && profileName.trim() !== "" ? profileName : phone.slice(-4);
+      const finalName = `Cliente ${rawName}`;
 
       const newContact: Contact = {
         id: crypto.randomUUID(),
@@ -48,36 +48,22 @@ const Inbox: React.FC = () => {
         phone: phone,
         group: 'Capturado via Chat'
       };
+      
       const updated = [newContact, ...contacts];
       localStorage.setItem('wb_contacts', JSON.stringify(updated));
       setSavedContacts(updated);
-      setDebugLog(`Lead salvo: ${finalName}`);
+      setDebugLog(`Novo lead: ${finalName}`);
       
-      // Dispara evento para atualizar outras partes do app que usem contatos
+      // Notifica o restante do app
       window.dispatchEvent(new Event('storage'));
     }
-  };
-
-  const exportChat = () => {
-    if (!selectedChat) return;
-    const chatMsgs = chatGroups[selectedChat];
-    const text = chatMsgs.map((m: any) => 
-      `[${new Date(m.timestamp).toLocaleString()}] ${m.isMe ? 'EU' : m.from}: ${m.text}`
-    ).join('\n');
-    
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `conversa_${selectedChat}.txt`;
-    a.click();
   };
 
   const handleAutomation = async (newMsg: IncomingMessage) => {
     const processedIds = JSON.parse(localStorage.getItem('wb_processed_ids') || '[]');
     if (processedIds.includes(newMsg.id)) return;
 
-    // Salva o contato automaticamente se for mensagem recebida
+    // CAPTURA AUTOMÁTICA: Salva o contato assim que a mensagem chega
     if (!newMsg.isMe) {
       autoSaveContact(newMsg.from, newMsg.fromName);
     }
@@ -161,7 +147,8 @@ const Inbox: React.FC = () => {
           return {
             id: stableId,
             from: String(m.from || m.de || m.telefone || '').replace(/\D/g, ''),
-            fromName: m.name || m.fromName || m.pushName || m.pushname || undefined,
+            // Mapeamento expandido para pegar nome de diversas fontes da API/Bridge
+            fromName: m.push_name || m.pushName || m.nome || m.name || m.fromName || undefined,
             text: m.text || m.texto || m.body || 'Mensagem recebida',
             timestamp: m.timestamp || new Date().toISOString(),
             unread: m.unread !== undefined ? m.unread : true,
@@ -260,7 +247,24 @@ const Inbox: React.FC = () => {
   };
 
   const isContactSaved = (phone: string) => {
-    return savedContacts.some(c => c.phone === phone && !c.group.includes('Capturado'));
+    // Consideramos salvo apenas se for manual ou agenda, não os capturados genéricos sem nome real
+    const contact = savedContacts.find(c => c.phone === phone);
+    return contact && !contact.name.includes(phone.slice(-4));
+  };
+
+  const exportChat = () => {
+    if (!selectedChat) return;
+    const chatMsgs = chatGroups[selectedChat];
+    const text = chatMsgs.map((m: any) => 
+      `[${new Date(m.timestamp).toLocaleString()}] ${m.isMe ? 'EU' : m.from}: ${m.text}`
+    ).join('\n');
+    
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `conversa_${selectedChat}.txt`;
+    a.click();
   };
 
   return (
@@ -274,7 +278,7 @@ const Inbox: React.FC = () => {
           <span className="text-[10px] text-slate-400 font-mono hidden lg:inline">| {debugLog}</span>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => fetchMessages(true, true)} title="Recuperar mensagens do servidor" className="text-[9px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 px-3 py-1 rounded hover:bg-amber-500 hover:text-white transition-all uppercase">Histórico</button>
+          <button onClick={() => fetchMessages(true, true)} title="Recuperar histórico" className="text-[9px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 px-3 py-1 rounded hover:bg-amber-500 hover:text-white transition-all uppercase">Histórico</button>
           <button onClick={() => fetchMessages(true)} className="text-[9px] font-bold bg-white/10 text-white px-3 py-1 rounded hover:bg-white/20 uppercase">Sync</button>
         </div>
       </div>
