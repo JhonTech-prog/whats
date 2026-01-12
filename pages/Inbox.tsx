@@ -10,15 +10,14 @@ const Inbox: React.FC = () => {
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [lastSync, setLastSync] = useState('--:--');
   const [status, setStatus] = useState<'online' | 'offline' | 'loading'>('loading');
-  const [errorLog, setErrorLog] = useState<string>('');
-  const [debugData, setDebugData] = useState<any>(null);
   const [showDebug, setShowDebug] = useState(false);
-  const [savedContacts, setSavedContacts] = useState<Contact[]>([]);
+  const [debugData, setDebugData] = useState<any>(null);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const isMounted = useRef(true);
-  const syncTimerRef = useRef<any>(null);
+  const pollTimer = useRef<any>(null);
 
+  // Auto-scroll
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -28,40 +27,34 @@ const Inbox: React.FC = () => {
   useEffect(() => {
     isMounted.current = true;
     
-    // Função para limpar dados corrompidos
-    const cleanCache = () => {
+    // Limpeza de inicialização: remove lixo 'unknown' do armazenamento local
+    const initCache = () => {
       try {
-        const mRaw = localStorage.getItem('wb_incoming');
-        if (mRaw) {
-          const m: IncomingMessage[] = JSON.parse(mRaw);
-          const valid = m.filter(msg => msg.from && msg.from !== 'unknown' && msg.from.length > 5);
-          if (valid.length !== m.length) {
-            localStorage.setItem('wb_incoming', JSON.stringify(valid));
-            setMessages(valid);
+        const stored = localStorage.getItem('wb_incoming');
+        if (stored) {
+          const parsed: IncomingMessage[] = JSON.parse(stored);
+          const cleaned = parsed.filter(m => m.from && !m.from.includes('unknown') && m.from.replace(/\D/g, '').length > 5);
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('wb_incoming', JSON.stringify(cleaned));
+            setMessages(cleaned);
           } else {
-            setMessages(m);
+            setMessages(parsed);
           }
         }
-        const c = localStorage.getItem('wb_contacts');
-        if (c) setSavedContacts(JSON.parse(c));
-      } catch (e) { console.error(e); }
+      } catch (e) { console.error("Erro no cache:", e); }
     };
+    initCache();
 
-    cleanCache();
-
-    const poll = async () => {
+    const startPolling = async () => {
       if (!isMounted.current) return;
       await fetchMessages();
-      if (isMounted.current) {
-        syncTimerRef.current = setTimeout(poll, 4000); 
-      }
+      pollTimer.current = setTimeout(startPolling, 3000);
     };
-
-    poll();
+    startPolling();
 
     return () => {
       isMounted.current = false;
-      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      if (pollTimer.current) clearTimeout(pollTimer.current);
     };
   }, []);
 
@@ -79,78 +72,81 @@ const Inbox: React.FC = () => {
     const finalUrl = url.replace(/\/$/, '') + '/messages';
 
     try {
-      const response = await fetch(`${finalUrl}?nocache=${Date.now()}`);
-      if (!response.ok) throw new Error(`Status ${response.status}`);
+      const response = await fetch(`${finalUrl}?cb=${Date.now()}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       
       setDebugData(data);
       setStatus('online');
-      setLastSync(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      setLastSync(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 
-      let msgList: any[] = [];
+      let rawMsgs: any[] = [];
       if (data.entry?.[0]?.changes?.[0]?.value?.messages) {
-        msgList = data.entry[0].changes[0].value.messages;
+        rawMsgs = data.entry[0].changes[0].value.messages;
       } else if (Array.isArray(data)) {
-        msgList = data;
+        rawMsgs = data;
       }
 
-      if (msgList.length > 0) processMessages(msgList);
+      if (rawMsgs.length > 0) processIncoming(rawMsgs);
     } catch (err: any) {
       setStatus('offline');
-      setErrorLog(err.message);
+      console.error("Polling error:", err);
     }
   };
 
-  const processMessages = (rawList: any[]) => {
-    const news: IncomingMessage[] = rawList.map((m: any): IncomingMessage | null => {
-      // Tenta achar o número de telefone
-      let rawFrom = m.from || m.wa_id || m.key?.remoteJid || '';
+  const processIncoming = (list: any[]) => {
+    const newMsgs: IncomingMessage[] = list.map((m: any): IncomingMessage | null => {
+      // EXTRATOR DE NÚMERO (Resolve 'unknown')
+      let rawFrom = m.from || m.wa_id || m.key?.remoteJid || m.sender || '';
       let phone = String(rawFrom).split('@')[0].replace(/\D/g, '');
       
-      if (!phone || phone.length < 8 || phone === '0') return null;
+      // Se não tem um número válido, descarta para evitar erro #131009 no futuro
+      if (!phone || phone.length < 8) return null;
 
-      // Tenta achar o texto
-      let text = typeof m.text === 'string' ? m.text : (m.text?.body || m.message?.conversation || m.body || '');
-      
+      // EXTRATOR DE TEXTO
+      let body = "";
+      if (typeof m.text === 'string') body = m.text;
+      else if (m.text?.body) body = m.text.body;
+      else if (m.message?.conversation) body = m.message.conversation;
+      else if (m.body) body = m.body;
+      else if (m.message?.extendedTextMessage?.text) body = m.message.extendedTextMessage.text;
+
       return {
-        id: m.id || m.key?.id || `msg-${Date.now()}`,
+        id: m.id || m.key?.id || `msg-${phone}-${Date.now()}`,
         from: phone,
-        fromName: m.pushName || '',
-        text: text.trim() || '[Mídia ou Mensagem Vazia]',
+        fromName: m.pushName || m.name || '',
+        text: body.trim() || '[Mídia ou Mensagem sem texto]',
         timestamp: new Date().toISOString(),
         unread: true,
         isMe: !!m.isMe || !!m.key?.fromMe
       };
     }).filter((m): m is IncomingMessage => m !== null);
 
-    const current: IncomingMessage[] = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
-    const existingIds = new Set(current.map(m => m.id));
-    const added = news.filter(n => !existingIds.has(n.id));
+    const stored: IncomingMessage[] = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
+    const existingIds = new Set(stored.map(x => x.id));
+    const toAdd = newMsgs.filter(n => !existingIds.has(n.id));
 
-    if (added.length > 0) {
-      const merged = [...current, ...added].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      setMessages(merged);
-      localStorage.setItem('wb_incoming', JSON.stringify(merged));
+    if (toAdd.length > 0) {
+      const updated = [...stored, ...toAdd].sort((a, b) => 
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+      setMessages(updated);
+      localStorage.setItem('wb_incoming', JSON.stringify(updated));
     }
   };
 
-  const handleSendReply = async () => {
+  const handleReply = async () => {
     if (!selectedChat || !replyText.trim() || isSendingReply) return;
     
-    if (selectedChat === 'unknown') {
-      alert("Erro: Não é possível responder a um remetente desconhecido.");
-      return;
-    }
-
-    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
     setIsSendingReply(true);
+    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
     
-    const res = await sendWhatsAppMessage(selectedChat, replyText, {
+    const result = await sendWhatsAppMessage(selectedChat, replyText, {
       accessToken: config.accessToken,
       phoneId: config.phoneId
     });
 
-    if (res.success) {
+    if (result.success) {
       const myMsg: IncomingMessage = {
         id: `sent-${Date.now()}`,
         from: selectedChat,
@@ -164,20 +160,18 @@ const Inbox: React.FC = () => {
       localStorage.setItem('wb_incoming', JSON.stringify(updated));
       setReplyText('');
     } else {
-      alert(res.error);
-      if (res.debug) console.log('DEBUG ENVIO:', res.debug);
+      alert(`FALHA NO ENVIO:\n${result.error}`);
     }
     setIsSendingReply(false);
   };
 
-  const chatGroups = messages.reduce((acc: any, msg) => {
-    const key = msg.from;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(msg);
+  const chatGroups = messages.reduce((acc: any, m) => {
+    if (!acc[m.from]) acc[m.from] = [];
+    acc[m.from].push(m);
     return acc;
   }, {});
 
-  const sortedChats = Object.keys(chatGroups).sort((a, b) => {
+  const sortedKeys = Object.keys(chatGroups).sort((a, b) => {
     const lastA = chatGroups[a][chatGroups[a].length - 1].timestamp;
     const lastB = chatGroups[b][chatGroups[b].length - 1].timestamp;
     return new Date(lastB).getTime() - new Date(lastA).getTime();
@@ -186,43 +180,57 @@ const Inbox: React.FC = () => {
   return (
     <div className="bg-white rounded-none md:rounded-2xl border-0 md:border border-slate-200 shadow-sm overflow-hidden h-screen md:h-[calc(100vh-200px)] flex flex-col relative">
       
+      {/* PAINEL DE DEPURAÇÃO */}
       {showDebug && (
-        <div className="absolute inset-0 z-[100] bg-slate-900 text-emerald-400 p-6 overflow-auto font-mono text-xs">
+        <div className="absolute inset-0 z-[100] bg-slate-900 text-emerald-400 p-6 overflow-auto font-mono text-[10px]">
           <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
-            <h2 className="text-white font-bold">DADOS DO SERVIDOR (JSON)</h2>
+            <h2 className="text-white font-bold text-sm">INSPEÇÃO DE DADOS DO SERVIDOR</h2>
             <button onClick={() => setShowDebug(false)} className="bg-rose-500 text-white px-4 py-1 rounded font-bold">FECHAR</button>
           </div>
-          <pre>{JSON.stringify(debugData, null, 2)}</pre>
+          <p className="mb-4 text-slate-400 uppercase font-bold tracking-widest">Abaixo está o que seu servidor no Render está enviando agora:</p>
+          <pre className="bg-slate-950 p-4 rounded-lg">{JSON.stringify(debugData, null, 2)}</pre>
         </div>
       )}
 
-      {/* BARRA DE STATUS - CORES FORTES PARA VISIBILIDADE */}
-      <div className={`px-4 py-3 flex justify-between items-center text-[11px] text-white font-black bg-[#111b21] border-b border-slate-800`}>
+      {/* BARRA DE STATUS SUPERIOR */}
+      <div className={`px-4 py-3 flex justify-between items-center text-[10px] text-white font-black transition-all ${status === 'online' ? 'bg-[#111b21]' : 'bg-rose-600'}`}>
         <div className="flex items-center gap-3">
-          <div className={`w-3 h-3 rounded-full ${status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
-          <span className="uppercase tracking-widest">{status === 'online' ? 'SISTEMA ONLINE' : 'ERRO DE CONEXÃO'}</span>
+          <div className={`w-3 h-3 rounded-full ${status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-white'}`}></div>
+          <span className="uppercase tracking-widest">
+            {status === 'online' ? `CONECTADO • ${messages.length} MSGS` : `SISTEMA OFFLINE`}
+          </span>
         </div>
         
-        <div className="flex gap-2">
-          <button onClick={() => setShowDebug(true)} className="bg-amber-500 text-slate-900 px-3 py-1.5 rounded-lg font-bold hover:scale-105 transition-all">INSPECIONAR JSON</button>
-          <button onClick={() => { if(confirm("Limpar mensagens?")) { localStorage.removeItem('wb_incoming'); setMessages([]); setSelectedChat(null); window.location.reload(); } }} className="bg-rose-600 text-white px-3 py-1.5 rounded-lg font-bold hover:scale-105 transition-all">LIMPAR CACHE</button>
+        <div className="flex gap-2 items-center">
+          <button onClick={() => setShowDebug(true)} className="bg-amber-500 text-slate-900 px-3 py-1 rounded-lg font-bold hover:scale-105 transition-all">DEPURAR JSON</button>
+          <button 
+            onClick={() => { if(confirm("Deseja apagar todas as mensagens da tela?")) { localStorage.removeItem('wb_incoming'); setMessages([]); setSelectedChat(null); window.location.reload(); } }} 
+            className="bg-rose-500 text-white px-3 py-1 rounded-lg font-bold hover:scale-105 transition-all"
+          >
+            RESETAR TELA
+          </button>
+          <span className="opacity-40 hidden sm:inline ml-2">{lastSync}</span>
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Lista Lateral */}
+        {/* LISTA DE CONVERSAS */}
         <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-slate-100 flex-col bg-white overflow-y-auto`}>
-          {sortedChats.length === 0 ? (
-            <div className="p-10 text-center mt-10 opacity-30">
-              <p className="text-4xl mb-4">📭</p>
-              <p className="text-[10px] font-black uppercase tracking-widest">Nenhuma mensagem real recebida.</p>
-              <p className="text-[9px] mt-2 text-slate-400">Verifique seu webhook na Meta.</p>
+          {sortedKeys.length === 0 ? (
+            <div className="p-10 text-center mt-10 opacity-20 flex flex-col items-center">
+              <span className="text-6xl mb-4">📥</span>
+              <p className="text-[10px] font-black uppercase tracking-widest">Sem mensagens novas</p>
             </div>
           ) : (
-            sortedChats.map(phone => {
-              const last = chatGroups[phone][chatGroups[phone].length - 1];
+            sortedKeys.map(phone => {
+              const chat = chatGroups[phone];
+              const last = chat[chat.length - 1];
               return (
-                <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left border-b border-slate-50 transition-all ${selectedChat === phone ? 'bg-emerald-50 border-r-4 border-r-emerald-500' : 'hover:bg-slate-50'}`}>
+                <button 
+                  key={phone} 
+                  onClick={() => setSelectedChat(phone)} 
+                  className={`w-full p-4 flex gap-3 text-left border-b border-slate-50 transition-all ${selectedChat === phone ? 'bg-emerald-50 border-r-4 border-r-emerald-500' : 'hover:bg-slate-50'}`}
+                >
                   <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-400 shrink-0 border border-slate-200">👤</div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center">
@@ -237,31 +245,46 @@ const Inbox: React.FC = () => {
           )}
         </div>
 
-        {/* Chat */}
+        {/* ÁREA DE CHAT */}
         <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#efeae2]`}>
           {selectedChat ? (
             <>
-              <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-3 shrink-0">
-                <button onClick={() => setSelectedChat(null)} className="md:hidden text-slate-400 text-2xl pr-2">←</button>
+              <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-3 shrink-0 shadow-sm">
+                <button onClick={() => setSelectedChat(null)} className="md:hidden text-slate-400 text-2xl pr-4">←</button>
                 <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center font-bold">👤</div>
                 <div>
                   <div className="font-bold text-slate-800 text-sm">+{selectedChat}</div>
+                  <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">Conversa Aberta</p>
                 </div>
               </div>
 
               <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto space-y-3 flex flex-col bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat">
                 {chatGroups[selectedChat].map((msg: any) => (
-                  <div key={msg.id} className={`max-w-[85%] p-3 rounded-xl shadow-sm text-sm ${msg.isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'}`}>
+                  <div key={msg.id} className={`max-w-[85%] p-3 rounded-xl shadow-sm text-sm ${
+                    msg.isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+                  }`}>
                     <p className="whitespace-pre-wrap text-slate-800 leading-relaxed font-medium">{msg.text}</p>
-                    <div className="text-[9px] opacity-40 text-right mt-1.5 font-bold uppercase">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                    <div className="text-[9px] opacity-40 text-right mt-1.5 font-bold uppercase tracking-tight">
+                      {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                    </div>
                   </div>
                 ))}
               </div>
 
               <div className="p-4 bg-[#f0f2f5] border-t border-slate-200">
                 <div className="flex gap-2 items-center max-w-4xl mx-auto">
-                  <input value={replyText} onChange={e => setReplyText(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleSendReply()} placeholder="Digite uma resposta..." className="flex-1 bg-white border-0 rounded-full px-5 py-3 text-sm focus:ring-1 focus:ring-emerald-300 outline-none shadow-sm" />
-                  <button onClick={handleSendReply} disabled={!replyText.trim() || isSendingReply} className="w-12 h-12 bg-[#00a884] text-white rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-all">
+                  <input 
+                    value={replyText} 
+                    onChange={e => setReplyText(e.target.value)} 
+                    onKeyPress={e => e.key === 'Enter' && handleReply()} 
+                    placeholder="Digite sua resposta..." 
+                    className="flex-1 bg-white border-0 rounded-full px-5 py-3 text-sm focus:ring-1 focus:ring-emerald-300 outline-none shadow-sm" 
+                  />
+                  <button 
+                    onClick={handleReply} 
+                    disabled={!replyText.trim() || isSendingReply} 
+                    className="w-12 h-12 bg-[#00a884] text-white rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-all disabled:opacity-50"
+                  >
                     {isSendingReply ? '...' : '✈️'}
                   </button>
                 </div>
@@ -270,7 +293,7 @@ const Inbox: React.FC = () => {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10 text-center opacity-30">
               <div className="text-8xl mb-6">💬</div>
-              <h3 className="font-black uppercase tracking-widest text-xs">Selecione uma conversa</h3>
+              <h3 className="font-black uppercase tracking-widest text-xs">Selecione uma conversa para começar</h3>
             </div>
           )}
         </div>

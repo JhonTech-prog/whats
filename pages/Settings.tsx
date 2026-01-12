@@ -35,14 +35,14 @@ const Settings: React.FC = () => {
       const response = await fetch(dataUrl);
       const data = await response.json();
 
-      if (Array.isArray(data)) {
+      if (Array.isArray(data) || data.messages || data.entry) {
         setBridgeStatus({ 
           type: 'success', 
           message: 'PONTE CONECTADA!', 
-          debug: `Sucesso! O servidor respondeu com uma lista de ${data.length} mensagens.` 
+          debug: 'Sucesso! O servidor respondeu com dados válidos.' 
         });
       } else {
-        setBridgeStatus({ type: 'error', message: 'FORMATO INVÁLIDO', debug: 'O servidor respondeu, mas não retornou uma lista [].' });
+        setBridgeStatus({ type: 'error', message: 'FORMATO ESTRANHO', debug: 'O servidor respondeu, mas não parece ser a lista de mensagens.' });
       }
     } catch (err) {
       setBridgeStatus({ type: 'error', message: 'FALHA DE CONEXÃO', debug: 'Não foi possível falar com o servidor no Render. Verifique a URL.' });
@@ -53,7 +53,7 @@ const Settings: React.FC = () => {
 
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    const config = { name: senderName, phone: senderPhone, accessToken, phoneId, bridgeUrl: bridgeUrl.trim() };
+    const config = { name: senderName, phone: senderPhone, accessToken: accessToken.trim(), phoneId: phoneId.trim(), bridgeUrl: bridgeUrl.trim() };
     localStorage.setItem('wb_sender_config', JSON.stringify(config));
     setSaveStatus(true);
     setTimeout(() => setSaveStatus(false), 3000);
@@ -63,22 +63,22 @@ const Settings: React.FC = () => {
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-20">
       <div className="bg-white rounded-3xl border border-slate-200 p-8 shadow-sm">
-        <h3 className="text-lg font-bold text-slate-800 mb-6">Configurações da API Oficial</h3>
+        <h3 className="text-lg font-bold text-slate-800 mb-6">Configurações da API Oficial (Meta)</h3>
         
         <form onSubmit={handleSaveConfig} className="space-y-6">
           <div className="space-y-4">
             <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 tracking-widest">URL da Ponte (Render)</label>
+              <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 tracking-widest">URL da Ponte Webhook (Render)</label>
               <div className="flex gap-2">
                 <input 
                   type="text" 
                   value={bridgeUrl} 
                   onChange={(e) => setBridgeUrl(e.target.value)} 
                   className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-xs" 
-                  placeholder="https://seu-app.onrender.com" 
+                  placeholder="https://seu-app-webhook.onrender.com" 
                 />
                 <button type="button" onClick={testBridge} disabled={isTestingBridge} className="bg-slate-800 text-white px-6 py-3 rounded-xl text-xs font-bold hover:bg-slate-900 transition-all">
-                  {isTestingBridge ? '...' : 'TESTAR URL'}
+                  {isTestingBridge ? '...' : 'TESTAR'}
                 </button>
               </div>
             </div>
@@ -96,12 +96,12 @@ const Settings: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                <div>
-                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Phone ID</label>
-                 <input type="text" value={phoneId} onChange={(e) => setPhoneId(e.target.value)} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm" placeholder="4123..." />
+                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Phone Number ID</label>
+                 <input type="text" value={phoneId} onChange={(e) => setPhoneId(e.target.value)} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono" placeholder="Ex: 412345678901234" />
                </div>
                <div>
-                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Access Token (Meta)</label>
-                 <input type="password" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm" placeholder="EAAB..." />
+                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Token de Acesso Permanente</label>
+                 <input type="password" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono" placeholder="EAAB..." />
                </div>
             </div>
           </div>
@@ -114,19 +114,21 @@ const Settings: React.FC = () => {
 
       <div className="bg-slate-900 text-white rounded-3xl p-8 border border-slate-800 shadow-xl">
         <h4 className="text-emerald-400 font-black text-sm mb-4 uppercase tracking-tighter flex items-center gap-2">
-          <span>🔓</span> MODO DESENVOLVIMENTO: POR QUE NÃO RECEBO?
+          <span>🚨</span> CHECKLIST PARA FUNCIONAMENTO TOTAL
         </h4>
         <div className="space-y-4 text-xs leading-relaxed">
-          <p className="text-slate-400 italic">Se o botão "Teste" da Meta chega na sua caixa de entrada, mas o seu celular não, o problema é este:</p>
           <ol className="list-decimal list-inside space-y-3">
             <li className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-              <strong>Adicione seu número como Testador:</strong> No Painel da Meta &gt; WhatsApp &gt; <strong>Configuração da API</strong>, procure o campo "Para" e adicione o seu número pessoal. Você deve validar o código que chegará no seu WhatsApp.
+              <strong>Número de Teste:</strong> Na Meta, você SÓ pode responder para números que foram autorizados manualmente como "Testadores" (máximo 5 números).
             </li>
             <li className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-              <strong>Mande mensagem para o número de teste:</strong> Você deve enviar mensagem <strong>PARA</strong> o número que a Meta te deu (o +1 555...). Se mandar para o seu número real de chip, a Meta bloqueia o Webhook.
+              <strong>Formato do Número:</strong> Para responder, o número deve ser apenas dígitos com código do país (ex: 5511999998888). O sistema agora limpa isso automaticamente.
             </li>
             <li className="p-3 bg-slate-800 rounded-xl border border-slate-700">
-              <strong>Verify Token:</strong> No painel de Webhooks da Meta, o token de verificação deve ser exatamente: <code className="text-emerald-400 font-bold">G3rPF002513</code>
+              <strong>Verify Token no Webhook:</strong> Se estiver configurando o Render, o token de verificação deve ser: <code className="text-emerald-400 font-bold">G3rPF002513</code>
+            </li>
+            <li className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+              <strong>Janela de 24h:</strong> Você só pode enviar mensagens de texto livre se o cliente mandou uma mensagem para você nas últimas 24 horas. Caso contrário, use um <strong>Template</strong>.
             </li>
           </ol>
         </div>
