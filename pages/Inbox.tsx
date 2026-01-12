@@ -1,42 +1,19 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { IncomingMessage } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { IncomingMessage, AutomationSettings, Contact } from '../types';
 import { sendWhatsAppMessage } from '../services/whatsappService';
-import { Link } from 'react-router-dom';
 
 const Inbox: React.FC = () => {
   const [messages, setMessages] = useState<IncomingMessage[]>([]);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
-  const [isSending, setIsSending] = useState(false);
-  const [status, setStatus] = useState<'online' | 'offline' | 'unconfigured' | 'syncing'>('unconfigured');
-  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [isSendingReply, setIsSendingReply] = useState(false);
+  const [debugLog, setDebugLog] = useState<string>('Sistema pronto.');
+  const [serverHealth, setServerHealth] = useState<'up' | 'down' | 'unknown'>('unknown');
+  const [savedContacts, setSavedContacts] = useState<Contact[]>([]);
   
+  const pollingRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const activePolling = useRef<boolean>(true);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('wb_incoming');
-    if (saved) {
-      try {
-        setMessages(JSON.parse(saved));
-      } catch (e) {
-        console.error("Erro ao recuperar cache:", e);
-      }
-    }
-    
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-
-    return () => { activePolling.current = false; };
-  }, []);
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      localStorage.setItem('wb_incoming', JSON.stringify(messages));
-    }
-  }, [messages]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -44,120 +21,201 @@ const Inbox: React.FC = () => {
     }
   }, [selectedChat, messages]);
 
-  const pollMessages = useCallback(async () => {
-    if (!activePolling.current) return;
-
-    const configRaw = localStorage.getItem('wb_sender_config');
-    if (!configRaw) {
-      setStatus('unconfigured');
-      return;
-    }
-
-    const config = JSON.parse(configRaw);
-    if (!config.bridgeUrl) {
-      setStatus('unconfigured');
-      return;
-    }
-
-    setStatus('syncing');
-
-    try {
-      const baseUrl = config.bridgeUrl.trim().replace(/\/$/, '');
-      const url = `${baseUrl}/messages?nocache=${Date.now()}`;
-
-      const res = await fetch(url, {
-        method: 'GET',
-        mode: 'cors',
-        headers: { 'Accept': 'application/json' }
-      });
-
-      if (!res.ok) throw new Error(`Servidor respondeu com erro ${res.status}`);
-      
-      const data = await res.json();
-      setStatus('online');
-      setErrorDetails(null);
-
-      let list: any[] = [];
-      if (Array.isArray(data)) list = data;
-      else if (data.messages && Array.isArray(data.messages)) list = data.messages;
-
-      if (list.length > 0) {
-        processIncoming(list);
-      }
-    } catch (err: any) {
-      setStatus('offline');
-      setErrorDetails(err.message === 'Failed to fetch' 
-        ? "Conexão negada. O servidor no Render pode estar hibernando ou sem CORS configurado." 
-        : err.message);
-    } finally {
-      if (activePolling.current) {
-        setTimeout(pollMessages, 5000); 
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    pollMessages();
-  }, [pollMessages]);
-
-  const processIncoming = (list: any[]) => {
-    const news: IncomingMessage[] = list.map((m: any): IncomingMessage | null => {
-      const msgId = m.id || `ext-${Date.now()}-${Math.random()}`;
-      
-      // Ajuste na extração: aceita campos 'from' direto ou do objeto 'key'
-      const rawFrom = m.from || m.wa_id || m.key?.remoteJid || '';
-      const phone = String(rawFrom).split('@')[0].replace(/\D/g, '');
-      
-      if (!phone || phone.length < 8) {
-        console.warn("Mensagem ignorada por falta de telefone:", m);
-        return null;
-      }
-
-      const text = m.text?.body || m.message?.conversation || m.body || m.text || '';
-      const isMe = !!m.isMe || !!m.key?.fromMe;
-
-      return {
-        id: msgId,
-        from: phone,
-        fromName: m.pushName || m.name || '',
-        text: String(text).trim() || '[Mensagem de Mídia]',
-        timestamp: m.timestamp || new Date().toISOString(),
-        unread: !isMe,
-        isMe: isMe
-      };
-    }).filter((m): m is IncomingMessage => m !== null);
-
-    if (news.length === 0) return;
-
-    setMessages(prev => {
-      const existingIds = new Set(prev.map(m => m.id));
-      const filtered = news.filter(n => !existingIds.has(n.id));
-      
-      if (filtered.length === 0) return prev;
-
-      filtered.forEach(msg => {
-        if (!msg.isMe && Notification.permission === "granted") {
-          new Notification(msg.fromName || `+${msg.from}`, { body: msg.text });
-        }
-      });
-
-      return [...prev, ...filtered].sort((a, b) => 
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      );
-    });
+  const loadContacts = () => {
+    const saved = localStorage.getItem('wb_contacts');
+    if (saved) setSavedContacts(JSON.parse(saved));
   };
 
-  const handleSend = async () => {
-    if (!selectedChat || !replyText.trim() || isSending) return;
+  useEffect(() => {
+    loadContacts();
+    window.addEventListener('storage', loadContacts);
+    return () => window.removeEventListener('storage', loadContacts);
+  }, []);
+
+  const autoSaveContact = (phone: string, profileName?: string) => {
+    if (!profileName || profileName.toLowerCase().trim() !== 'cliente') {
+      console.log(`[SISTEMA] Contato ${phone} (${profileName || 'Sem Nome'}) ignorado pela regra de captura.`);
+      return;
+    }
+
+    const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
+    const exists = contacts.find(c => c.phone === phone);
     
-    setIsSending(true);
-    const configRaw = localStorage.getItem('wb_sender_config');
-    const config = configRaw ? JSON.parse(configRaw) : {};
+    if (!exists) {
+      const newContact: Contact = {
+        id: crypto.randomUUID(),
+        name: `Lead Cliente ${phone.slice(-4)}`,
+        phone: phone,
+        group: 'Capturado via Chat'
+      };
+      const updated = [newContact, ...contacts];
+      localStorage.setItem('wb_contacts', JSON.stringify(updated));
+      setSavedContacts(updated);
+      console.log(`[SISTEMA] Novo lead "cliente" capturado: ${phone}`);
+    }
+  };
+
+  const exportChat = () => {
+    if (!selectedChat) return;
+    const chatMsgs = chatGroups[selectedChat];
+    const text = chatMsgs.map((m: any) => 
+      `[${new Date(m.timestamp).toLocaleString()}] ${m.isMe ? 'EU' : m.from}: ${m.text}`
+    ).join('\n');
     
-    const result = await sendWhatsAppMessage(selectedChat, replyText, config);
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `conversa_${selectedChat}.txt`;
+    a.click();
+  };
+
+  const handleAutomation = async (newMsg: IncomingMessage) => {
+    const processedIds = JSON.parse(localStorage.getItem('wb_processed_ids') || '[]');
+    if (processedIds.includes(newMsg.id)) return;
+
+    if (!newMsg.isMe) autoSaveContact(newMsg.from, newMsg.fromName);
+
+    const autoSettingsRaw = localStorage.getItem('wb_automation_settings');
+    if (!autoSettingsRaw) return;
+    const settings: AutomationSettings = JSON.parse(autoSettingsRaw);
+    if (!settings.enabled) return;
+
+    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
+    if (!config.accessToken || !config.phoneId) return;
+
+    let responseToSend = "";
+
+    if (settings.keywords.enabled) {
+      const cleanText = newMsg.text.toLowerCase().trim();
+      const rule = settings.keywords.rules.find(r => 
+        r.trigger && cleanText.includes(r.trigger.toLowerCase().trim())
+      );
+      if (rule) responseToSend = rule.response;
+    }
+
+    if (!responseToSend && settings.officeHours.enabled) {
+      const now = new Date();
+      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const isOut = currentTime < settings.officeHours.start || currentTime > settings.officeHours.end;
+      if (isOut) responseToSend = settings.officeHours.awayMessage;
+    }
+
+    if (!responseToSend && settings.welcomeMessage.enabled) {
+      const localMsgs = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
+      const count = localMsgs.filter((m: any) => m.from === newMsg.from).length;
+      if (count <= 1) responseToSend = settings.welcomeMessage.text;
+    }
+
+    if (responseToSend) {
+      processedIds.push(newMsg.id);
+      localStorage.setItem('wb_processed_ids', JSON.stringify(processedIds.slice(-200)));
+
+      const result = await sendWhatsAppMessage(newMsg.from, responseToSend, {
+        accessToken: config.accessToken,
+        phoneId: config.phoneId
+      });
+
+      if (result.success) {
+        const myMessage: IncomingMessage = {
+          id: `auto-${Date.now()}-${Math.random()}`,
+          from: newMsg.from,
+          text: responseToSend,
+          timestamp: new Date().toISOString(),
+          unread: false,
+          isMe: true
+        };
+        setMessages(prev => {
+          const updated = [...prev, myMessage];
+          localStorage.setItem('wb_incoming', JSON.stringify(updated));
+          return updated;
+        });
+      }
+    } else {
+      processedIds.push(newMsg.id);
+      localStorage.setItem('wb_processed_ids', JSON.stringify(processedIds.slice(-200)));
+    }
+  };
+
+  const fetchMessages = async (isManual = false, isDeepSync = false) => {
+    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
+    if (!config.bridgeUrl) return;
+
+    const dataUrl = config.bridgeUrl.endsWith('/messages') ? config.bridgeUrl : (config.bridgeUrl.endsWith('/') ? config.bridgeUrl + 'messages' : config.bridgeUrl + '/messages');
+
+    try {
+      const response = await fetch(dataUrl);
+      if (!response.ok) throw new Error();
+      const rawData = await response.json();
+      setServerHealth('up');
+
+      if (Array.isArray(rawData)) {
+        const formattedMessages: IncomingMessage[] = rawData.map((m: any) => {
+          const stableId = m.id || `${m.from}-${m.timestamp}`;
+          return {
+            id: stableId,
+            from: m.from || m.de || 'Sistema',
+            fromName: m.name || m.fromName || m.pushName || undefined,
+            text: m.text || m.texto || 'Mensagem recebida',
+            timestamp: m.timestamp || new Date().toISOString(),
+            unread: m.unread !== undefined ? m.unread : true,
+            isMe: m.isMe || false
+          };
+        });
+
+        const localSaved = isDeepSync ? [] : JSON.parse(localStorage.getItem('wb_incoming') || '[]');
+        const existingIds = new Set(localSaved.map((m: any) => m.id));
+        const newMessages = formattedMessages.filter(m => !existingIds.has(m.id));
+
+        if (newMessages.length > 0 || isDeepSync) {
+          const updated = isDeepSync ? formattedMessages : [...localSaved, ...newMessages];
+          updated.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+          
+          localStorage.setItem('wb_incoming', JSON.stringify(updated));
+          setMessages(updated);
+
+          if (!isDeepSync) {
+            newMessages.forEach(msg => {
+               if(!msg.isMe) handleAutomation(msg);
+            });
+          }
+          setDebugLog(isDeepSync ? `Sincronizado.` : `${newMessages.length} novas.`);
+        }
+      }
+    } catch (e) {
+      setServerHealth('down');
+    }
+  };
+
+  useEffect(() => {
+    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
+    if (config.bridgeUrl) {
+      fetchMessages();
+      pollingRef.current = window.setInterval(() => fetchMessages(), 10000);
+    }
+    const saved = localStorage.getItem('wb_incoming');
+    if (saved) setMessages(JSON.parse(saved));
     
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
+  }, []);
+
+  const handleSendReply = async () => {
+    if (!selectedChat || !replyText.trim() || isSendingReply) return;
+
+    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
+    if (!config.accessToken || !config.phoneId) {
+      alert("Configure seu Token e Phone ID nos Ajustes.");
+      return;
+    }
+
+    setIsSendingReply(true);
+    const result = await sendWhatsAppMessage(selectedChat, replyText, {
+      accessToken: config.accessToken,
+      phoneId: config.phoneId
+    });
+
     if (result.success) {
-      const myMsg: IncomingMessage = {
+      const myMessage: IncomingMessage = {
         id: `sent-${Date.now()}`,
         from: selectedChat,
         text: replyText,
@@ -165,149 +223,154 @@ const Inbox: React.FC = () => {
         unread: false,
         isMe: true
       };
-      setMessages(prev => [...prev, myMsg]);
+
+      setMessages(prev => {
+        const updated = [...prev, myMessage];
+        localStorage.setItem('wb_incoming', JSON.stringify(updated));
+        return updated;
+      });
       setReplyText('');
     } else {
-      alert(`Falha no envio: ${result.error}`);
+      alert("Erro ao enviar: " + result.error);
     }
-    setIsSending(false);
+    setIsSendingReply(false);
   };
 
-  const chatGroups = messages.reduce((acc: any, m) => {
-    if (!acc[m.from]) acc[m.from] = [];
-    acc[m.from].push(m);
+  const chatGroups = messages.reduce((acc: any, msg) => {
+    if (!acc[msg.from]) acc[msg.from] = [];
+    acc[msg.from].push(msg);
     return acc;
   }, {});
 
-  const sortedKeys = Object.keys(chatGroups).sort((a, b) => {
+  const sortedChats = Object.keys(chatGroups).sort((a, b) => {
     const lastA = chatGroups[a][chatGroups[a].length - 1].timestamp;
     const lastB = chatGroups[b][chatGroups[b].length - 1].timestamp;
     return new Date(lastB).getTime() - new Date(lastA).getTime();
   });
 
-  if (status === 'unconfigured') {
-    return (
-      <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-10 text-center">
-        <div className="text-6xl mb-4">🔧</div>
-        <h2 className="text-xl font-bold text-slate-800 mb-2">Configure o Bridge</h2>
-        <p className="text-slate-500 max-w-md mb-6 text-sm">
-          Falta configurar a URL do seu Bridge nas Configurações.
-        </p>
-        <Link to="/settings" className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg">
-          Configurar Agora
-        </Link>
-      </div>
-    );
-  }
+  const getContactName = (phone: string) => {
+    const contact = savedContacts.find(c => c.phone === phone);
+    return contact ? contact.name : `+${phone}`;
+  };
+
+  const isContactSaved = (phone: string) => {
+    return savedContacts.some(c => c.phone === phone && !c.name.startsWith('Lead '));
+  };
 
   return (
-    <div className="bg-white rounded-none md:rounded-2xl border border-slate-200 shadow-sm h-screen md:h-[calc(100vh-200px)] flex overflow-hidden">
-      <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-slate-100 flex-col bg-white overflow-y-auto`}>
-        <div className="p-4 border-b border-slate-50 flex justify-between items-center bg-slate-50 sticky top-0 z-10">
-          <h2 className="font-bold text-slate-800 text-sm">Mensagens</h2>
-          <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${status === 'online' || status === 'syncing' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
-            <span className="text-[9px] font-bold text-slate-400 uppercase">
-              {status === 'syncing' ? 'Sincronizando...' : status}
-            </span>
-          </div>
+    <div className="bg-white rounded-none md:rounded-2xl border-0 md:border border-slate-200 shadow-sm overflow-hidden h-screen md:h-[calc(100vh-200px)] flex flex-col">
+      <div className="px-4 py-3 bg-slate-900 flex justify-between items-center border-b border-slate-800">
+        <div className="flex items-center gap-3">
+          <div className={`w-2 h-2 rounded-full ${serverHealth === 'up' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
+          <span className="text-[10px] text-white font-bold uppercase tracking-widest">
+            {serverHealth === 'up' ? 'Automação Ativa' : 'Ponte Offline'}
+          </span>
+          <span className="text-[10px] text-slate-400 font-mono hidden lg:inline">| {debugLog}</span>
         </div>
-
-        {errorDetails && (
-          <div className="m-2 p-3 bg-rose-50 border border-rose-100 rounded-lg">
-            <p className="text-[10px] text-rose-600 font-bold leading-tight">
-              ⚠️ ERRO: {errorDetails}
-            </p>
-          </div>
-        )}
-        
-        {sortedKeys.length === 0 ? (
-          <div className="p-10 text-center opacity-30 mt-10">
-            <p className="text-4xl mb-2">😴</p>
-            <p className="text-[10px] font-bold uppercase tracking-widest">Nenhuma conversa...</p>
-          </div>
-        ) : (
-          sortedKeys.map(phone => {
-            const chat = chatGroups[phone];
-            const last = chat[chat.length - 1];
-            const unreadCount = chat.filter((m: any) => m.unread).length;
-            return (
-              <button 
-                key={phone} 
-                onClick={() => { setSelectedChat(phone); setMessages(prev => prev.map(m => m.from === phone ? {...m, unread: false} : m)); }} 
-                className={`w-full p-4 text-left border-b border-slate-50 hover:bg-slate-50 transition-all flex items-center gap-3 ${selectedChat === phone ? 'bg-emerald-50 border-r-4 border-r-emerald-500' : ''}`}
-              >
-                <div className="w-10 h-10 bg-slate-100 rounded-full flex-shrink-0 flex items-center justify-center text-lg">👤</div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center mb-0.5">
-                    <p className={`text-sm truncate ${unreadCount > 0 ? 'font-black text-slate-900' : 'font-bold text-slate-700'}`}>
-                      {last.fromName || `+${phone}`}
-                    </p>
-                    <span className="text-[9px] text-slate-400 shrink-0">
-                      {new Date(last.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <p className="text-xs text-slate-500 truncate">{last.text}</p>
-                    {unreadCount > 0 && <span className="bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full ml-2">{unreadCount}</span>}
-                  </div>
-                </div>
-              </button>
-            );
-          })
-        )}
+        <div className="flex gap-2">
+          <button onClick={() => fetchMessages(true, true)} title="Recuperar mensagens do servidor" className="text-[9px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 px-3 py-1 rounded hover:bg-amber-500 hover:text-white transition-all uppercase">Histórico</button>
+          <button onClick={() => fetchMessages(true)} className="text-[9px] font-bold bg-white/10 text-white px-3 py-1 rounded hover:bg-white/20 uppercase">Sync</button>
+        </div>
       </div>
 
-      <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#efeae2]`}>
-        {selectedChat ? (
-          <>
-            <div className="p-3 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <button onClick={() => setSelectedChat(null)} className="md:hidden text-slate-400 p-2">←</button>
-                <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center font-bold">👤</div>
-                <div>
-                  <p className="font-bold text-slate-800 text-sm">+{selectedChat}</p>
-                  <p className="text-[9px] text-emerald-500 font-bold uppercase tracking-widest">Atendimento Ativo</p>
-                </div>
-              </div>
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar de Chats - Ocultar no mobile quando um chat estiver aberto para ganhar espaço */}
+        <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-slate-100 flex-col bg-white overflow-y-auto`}>
+          {sortedChats.length === 0 ? (
+            <div className="p-10 text-center opacity-20 mt-10">
+              <p className="text-4xl mb-2">📩</p>
+              <p className="text-[10px] font-bold uppercase">Sem mensagens</p>
             </div>
+          ) : (
+            sortedChats.map(phone => (
+              <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left hover:bg-slate-50 border-b border-slate-50 transition-colors ${selectedChat === phone ? 'bg-emerald-50/50' : ''}`}>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs ${isContactSaved(phone) ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500'}`}>
+                  {isContactSaved(phone) ? '👤' : '💡'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-baseline">
+                    <p className="font-bold text-slate-800 text-sm truncate">{getContactName(phone)}</p>
+                    {chatGroups[phone].some((m:any) => m.unread && !m.isMe) && <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>}
+                  </div>
+                  <p className="text-xs text-slate-500 truncate">{chatGroups[phone][chatGroups[phone].length - 1].text}</p>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
 
-            <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto space-y-3 flex flex-col bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat">
-              {chatGroups[selectedChat].map((m: any) => (
-                <div key={m.id} className={`max-w-[85%] p-3 rounded-xl shadow-sm text-sm ${m.isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'}`}>
-                  <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
-                  <div className="text-[9px] opacity-40 text-right mt-1 font-bold uppercase">
-                    {new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+        {/* Área do Chat */}
+        <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#efeae2] relative shadow-inner`}>
+          {selectedChat ? (
+            <>
+              <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center z-10 shadow-sm">
+                <div className="flex items-center gap-3">
+                  {/* Botão Voltar no Mobile */}
+                  <button onClick={() => setSelectedChat(null)} className="md:hidden text-slate-400 p-1">←</button>
+                  <div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center font-bold text-[10px]">👤</div>
+                  <div>
+                    <p className="font-bold text-slate-800 text-sm">{getContactName(selectedChat)}</p>
+                    <p className="text-[8px] text-emerald-500 font-bold uppercase">+{selectedChat}</p>
                   </div>
                 </div>
-              ))}
-            </div>
-
-            <div className="p-4 bg-[#f0f2f5] border-t border-slate-200">
-              <div className="flex gap-2 max-w-4xl mx-auto items-center">
-                <input 
-                  value={replyText} 
-                  onChange={e => setReplyText(e.target.value)} 
-                  onKeyPress={e => e.key === 'Enter' && handleSend()} 
-                  className="flex-1 px-5 py-3 rounded-full border-0 outline-none text-sm shadow-sm" 
-                  placeholder="Mensagem..." 
-                />
-                <button 
-                  onClick={handleSend} 
-                  disabled={!replyText.trim() || isSending} 
-                  className="w-12 h-12 bg-[#00a884] text-white rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-all disabled:opacity-50"
-                >
-                  {isSending ? '...' : '✈️'}
-                </button>
+                <div className="flex gap-3">
+                  <button onClick={exportChat} className="hidden sm:inline text-[9px] font-bold text-slate-400 hover:text-indigo-500 uppercase tracking-wider">Exportar</button>
+                  <button onClick={() => {
+                     if(confirm("Remover conversa local?")) {
+                        const updated = messages.filter(m => m.from !== selectedChat);
+                        setMessages(updated);
+                        localStorage.setItem('wb_incoming', JSON.stringify(updated));
+                        setSelectedChat(null);
+                     }
+                  }} className="text-[10px] font-bold text-slate-400 hover:text-rose-500 uppercase tracking-wider">Limpar</button>
+                </div>
               </div>
+
+              <div ref={scrollRef} className="flex-1 p-4 md:p-6 overflow-y-auto space-y-3 flex flex-col">
+                {chatGroups[selectedChat].map((msg: any) => (
+                  <div key={msg.id} className={`max-w-[85%] p-3 rounded-xl shadow-sm border text-sm ${
+                    msg.isMe 
+                      ? 'bg-[#dcf8c6] border-[#c1e8a0] self-end rounded-tr-none text-slate-800' 
+                      : 'bg-white border-slate-200 self-start rounded-tl-none text-slate-700'
+                  }`}>
+                    <p className="whitespace-pre-wrap">{msg.text}</p>
+                    <div className="flex justify-end items-center gap-1 mt-1">
+                      <p className="text-[9px] text-slate-400 opacity-70">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                      {msg.isMe && <span className="text-[10px] text-blue-500">✓✓</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-4 bg-white border-t border-slate-200 pb-safe">
+                <div className="flex gap-2 items-end max-w-4xl mx-auto">
+                  <textarea 
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendReply();
+                      }
+                    }}
+                    placeholder="Sua resposta..."
+                    rows={1}
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none max-h-32 transition-all"
+                  />
+                  <button onClick={handleSendReply} disabled={!replyText.trim() || isSendingReply} className="w-12 h-12 bg-emerald-500 text-white rounded-full flex items-center justify-center hover:bg-emerald-600 disabled:opacity-50 transition-all shadow-md active:scale-95">
+                    {isSendingReply ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <span className="text-xl">✈️</span>}
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-12 text-center">
+              <div className="w-24 h-24 bg-white/50 rounded-full flex items-center justify-center text-4xl mb-4 grayscale opacity-30 shadow-sm">🤖</div>
+              <h3 className="font-bold text-slate-500 uppercase tracking-widest text-xs">Robô de Atendimento</h3>
+              <p className="text-[10px] mt-2 max-w-[200px]">Selecione um chat para responder.</p>
             </div>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10 opacity-30">
-            <div className="text-8xl mb-4">💬</div>
-            <h3 className="font-black uppercase tracking-widest text-xs text-center">Selecione uma conversa</h3>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

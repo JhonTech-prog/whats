@@ -23,10 +23,6 @@ export interface IncomingMessage {
   timestamp: string;
   unread: boolean;
   isMe?: boolean;
-  type?: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker';
-  mediaUrl?: string;
-  mimeType?: string;
-  fileName?: string;
 }
 
 export interface AutomationSettings {

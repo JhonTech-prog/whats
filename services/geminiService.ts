@@ -1,21 +1,10 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
-/**
- * Helper para inicializar o AI de forma segura.
- * A chave DEVE vir de process.env.API_KEY conforme os requisitos do sistema.
- */
-const getAiClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API_KEY não configurada no ambiente.");
-  }
-  return new GoogleGenAI({ apiKey });
-};
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
 export const generateMessageContent = async (prompt: string, tone: string): Promise<string> => {
   try {
-    const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Escreva uma mensagem de WhatsApp profissional em Português do Brasil baseada neste pedido: "${prompt}". 
@@ -32,16 +21,12 @@ export const generateMessageContent = async (prompt: string, tone: string): Prom
     return response.text || 'Falha ao gerar o conteúdo da mensagem.';
   } catch (error) {
     console.error('Erro Gemini:', error);
-    if (error instanceof Error && error.message.includes("API_KEY")) {
-      return "Erro: Chave de API do Google não configurada no servidor de hospedagem.";
-    }
-    return 'Erro ao gerar conteúdo por IA. Por favor, verifique as configurações.';
+    return 'Erro ao gerar conteúdo por IA. Por favor, tente novamente.';
   }
 };
 
 export const refineMessage = async (currentMessage: string, feedback: string): Promise<string> => {
   try {
-    const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Refine esta mensagem de WhatsApp: "${currentMessage}". 
