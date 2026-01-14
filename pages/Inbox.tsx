@@ -27,13 +27,15 @@ const Inbox: React.FC = () => {
     return isNaN(parsed) ? Date.now() : parsed;
   };
 
-  // Solicitar permissão de notificação ao carregar
+  // Solicitar permissão de notificação e carregar áudio "Olha a mensagem"
   useEffect(() => {
     if ("Notification" in window) {
       Notification.requestPermission();
     }
-    // Inicializar áudio de notificação
-    audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
+    // Inicializar áudio de notificação com o som "Olha a mensagem"
+    const audio = new Audio('https://www.myinstants.com/media/sounds/olha-a-mensagem-original.mp3');
+    audio.load();
+    audioRef.current = audio;
   }, []);
 
   useEffect(() => {
@@ -54,9 +56,12 @@ const Inbox: React.FC = () => {
   }, []);
 
   const triggerNotification = (msg: IncomingMessage) => {
-    // 1. Som
+    // 1. Som "Olha a mensagem!"
     if (audioRef.current) {
-      audioRef.current.play().catch(() => {}); // Ignora se o navegador bloquear sem interação
+      audioRef.current.currentTime = 0; // Reinicia o áudio caso receba mensagens seguidas
+      audioRef.current.play().catch((e) => {
+        console.warn("Navegador bloqueou áudio automático. Interaja com a página uma vez para liberar.", e);
+      });
     }
 
     // 2. Notificação Nativa
