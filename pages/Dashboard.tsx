@@ -25,31 +25,33 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     const loadStats = () => {
-      const campaigns: Campaign[] = JSON.parse(localStorage.getItem('wb_campaigns') || '[]');
-      const messages: IncomingMessage[] = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
-      const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
+      try {
+        const campaigns: Campaign[] = JSON.parse(localStorage.getItem('wb_campaigns') || '[]');
+        const messages: IncomingMessage[] = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
+        const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
 
-      const totalSent = campaigns.reduce((acc, c) => acc + (c.sentCount || 0), 0);
-      const totalPlanned = campaigns.reduce((acc, c) => acc + (c.totalContacts || 0), 0);
-      const deliveryRate = totalPlanned > 0 ? Math.round((totalSent / totalPlanned) * 100) + '%' : '0%';
-      const activeCampaigns = campaigns.filter(c => c.status === 'running' || c.status === 'draft').length;
-      
-      // Leads capturados nos últimos 7 dias (simulado por grupo)
-      const newLeads = contacts.filter(c => c.group.toLowerCase().includes('lead') || c.group.toLowerCase().includes('chat')).length;
+        const totalSent = campaigns.reduce((acc, c) => acc + (c.sentCount || 0), 0);
+        const totalPlanned = campaigns.reduce((acc, c) => acc + (c.totalContacts || 0), 0);
+        const deliveryRate = totalPlanned > 0 ? Math.round((totalSent / totalPlanned) * 100) + '%' : '0%';
+        const activeCampaigns = campaigns.filter(c => c.status === 'running' || c.status === 'draft').length;
+        
+        const newLeads = contacts.filter(c => c.group.toLowerCase().includes('lead') || c.group.toLowerCase().includes('chat')).length;
 
-      // Pegar as últimas 5 mensagens recebidas para atividade
-      const recent = messages
-        .filter(m => !m.isMe)
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-        .slice(0, 5);
+        const recent = messages
+          .filter(m => !m.isMe)
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, 5);
 
-      setStats({
-        totalSent,
-        deliveryRate,
-        activeCampaigns,
-        newLeads,
-        recentActivity: recent
-      });
+        setStats({
+          totalSent,
+          deliveryRate,
+          activeCampaigns,
+          newLeads,
+          recentActivity: recent
+        });
+      } catch (e) {
+        console.error("Erro ao carregar estatísticas:", e);
+      }
     };
 
     loadStats();
@@ -77,7 +79,6 @@ const Dashboard: React.FC = () => {
           <div className="h-64 bg-slate-50 rounded-xl flex items-center justify-center border border-dashed border-slate-200 relative overflow-hidden">
             {stats.totalSent > 0 ? (
                <div className="absolute inset-0 flex items-end px-4 pb-4 gap-2">
-                  {/* Gráfico de barras simples simulado */}
                   {[40, 70, 55, 90, 65, 85, 100].map((h, i) => (
                     <div key={i} className="flex-1 bg-emerald-400/20 rounded-t-sm" style={{ height: `${h}%` }}></div>
                   ))}

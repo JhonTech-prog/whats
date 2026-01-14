@@ -27,12 +27,10 @@ const Inbox: React.FC = () => {
     return isNaN(parsed) ? Date.now() : parsed;
   };
 
-  // Solicitar permissão de notificação e carregar áudio "Olha a mensagem"
   useEffect(() => {
     if ("Notification" in window) {
       Notification.requestPermission();
     }
-    // Inicializar áudio de notificação com o som "Olha a mensagem"
     const audio = new Audio('https://www.myinstants.com/media/sounds/olha-a-mensagem-original.mp3');
     audio.load();
     audioRef.current = audio;
@@ -45,8 +43,10 @@ const Inbox: React.FC = () => {
   }, [selectedChat, messages]);
 
   const loadContacts = () => {
-    const saved = localStorage.getItem('wb_contacts');
-    if (saved) setSavedContacts(JSON.parse(saved));
+    try {
+      const saved = localStorage.getItem('wb_contacts');
+      if (saved) setSavedContacts(JSON.parse(saved));
+    } catch (e) { console.error(e); }
   };
 
   useEffect(() => {
@@ -56,18 +56,16 @@ const Inbox: React.FC = () => {
   }, []);
 
   const triggerNotification = (msg: IncomingMessage) => {
-    // 1. Som "Olha a mensagem!"
     if (audioRef.current) {
-      audioRef.current.currentTime = 0; // Reinicia o áudio caso receba mensagens seguidas
-      audioRef.current.play().catch((e) => {
-        console.warn("Navegador bloqueou áudio automático. Interaja com a página uma vez para liberar.", e);
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(() => {
+        console.warn("Áudio bloqueado pelo navegador. Interaja com a página.");
       });
     }
 
-    // 2. Notificação Nativa
     if (Notification.permission === "granted" && !msg.isMe) {
       const name = getContactName(msg.from);
-      new Notification(`Nova mensagem de ${name}`, {
+      new Notification(`Mensagem de ${name}`, {
         body: msg.text,
         icon: 'https://cdn-icons-png.flaticon.com/512/124/124034.png'
       });
@@ -75,42 +73,44 @@ const Inbox: React.FC = () => {
   };
 
   const autoSaveContact = (phone: string, profileName?: string) => {
-    const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
-    const index = contacts.findIndex(c => c.phone === phone);
-    
-    if (index === -1) {
-      const autoSettingsRaw = localStorage.getItem('wb_automation_settings');
-      let targetGroup = 'Capturado via Chat';
+    try {
+      const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
+      const index = contacts.findIndex(c => c.phone === phone);
       
-      if (autoSettingsRaw) {
-        const settings: AutomationSettings = JSON.parse(autoSettingsRaw);
-        if (settings.enabled && settings.leadGrouping?.enabled && settings.leadGrouping?.groupName) {
-          targetGroup = settings.leadGrouping.groupName;
+      if (index === -1) {
+        const autoSettingsRaw = localStorage.getItem('wb_automation_settings');
+        let targetGroup = 'Capturado via Chat';
+        
+        if (autoSettingsRaw) {
+          const settings: AutomationSettings = JSON.parse(autoSettingsRaw);
+          if (settings.enabled && settings.leadGrouping?.enabled && settings.leadGrouping?.groupName) {
+            targetGroup = settings.leadGrouping.groupName;
+          }
         }
-      }
 
-      const nameFromProfile = profileName && profileName.trim() !== "" ? profileName.trim() : null;
-      const finalName = nameFromProfile ? `Cliente ${nameFromProfile}` : `Cliente ${phone.slice(-4)}`;
-      const newContact: Contact = {
-        id: crypto.randomUUID(),
-        name: finalName,
-        phone: phone,
-        group: targetGroup
-      };
-      const updated = [newContact, ...contacts];
-      localStorage.setItem('wb_contacts', JSON.stringify(updated));
-      setSavedContacts(updated);
-      window.dispatchEvent(new Event('storage'));
-    }
+        const nameFromProfile = profileName && profileName.trim() !== "" ? profileName.trim() : null;
+        const finalName = nameFromProfile ? `Cliente ${nameFromProfile}` : `Cliente ${phone.slice(-4)}`;
+        const newContact: Contact = {
+          id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).substring(2),
+          name: finalName,
+          phone: phone,
+          group: targetGroup
+        };
+        const updated = [newContact, ...contacts];
+        localStorage.setItem('wb_contacts', JSON.stringify(updated));
+        setSavedContacts(updated);
+        window.dispatchEvent(new Event('storage'));
+      }
+    } catch (e) { console.error(e); }
   };
 
-  const fetchMessages = async (isManual = false, isDeepSync = false) => {
-    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
-    if (!config.bridgeUrl) return;
-
-    const dataUrl = config.bridgeUrl.endsWith('/messages') ? config.bridgeUrl : (config.bridgeUrl.endsWith('/') ? config.bridgeUrl + 'messages' : config.bridgeUrl + '/messages');
-
+  const fetchMessages = async (isManual = false) => {
     try {
+      const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
+      if (!config.bridgeUrl) return;
+
+      const dataUrl = config.bridgeUrl.endsWith('/messages') ? config.bridgeUrl : (config.bridgeUrl.endsWith('/') ? config.bridgeUrl + 'messages' : config.bridgeUrl + '/messages');
+
       const response = await fetch(dataUrl);
       if (!response.ok) throw new Error();
       const rawData = await response.json();
@@ -149,7 +149,6 @@ const Inbox: React.FC = () => {
           };
         });
 
-        // Detectar Mensagens NOVAS para Notificar
         let hasNewMessages = false;
         formattedMessages.forEach(msg => {
           if (!existingIds.has(msg.id) && !msg.isMe) {
@@ -167,14 +166,13 @@ const Inbox: React.FC = () => {
         setMessages(merged);
         localStorage.setItem('wb_incoming', JSON.stringify(merged));
         
-        if (isManual) setDebugLog(`Sincronizado: ${merged.length} msgs.`);
-        if (hasNewMessages) window.dispatchEvent(new Event('storage')); // Atualiza badges no layout
+        if (isManual) setDebugLog(`Sincronizado.`);
+        if (hasNewMessages) window.dispatchEvent(new Event('storage'));
         
         formattedMessages.filter(m => !m.isMe).forEach(msg => autoSaveContact(msg.from, msg.fromName));
       }
     } catch (e) {
       setServerHealth('down');
-      setDebugLog('Erro na ponte.');
     }
   };
 
@@ -186,9 +184,11 @@ const Inbox: React.FC = () => {
     }
     const saved = localStorage.getItem('wb_incoming');
     if (saved) {
-      const parsed = JSON.parse(saved);
-      parsed.sort((a: any, b: any) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp));
-      setMessages(parsed);
+      try {
+        const parsed = JSON.parse(saved);
+        parsed.sort((a: any, b: any) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp));
+        setMessages(parsed);
+      } catch(e) {}
     }
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, []);
@@ -271,7 +271,6 @@ const Inbox: React.FC = () => {
     return contact ? contact.name : `+${phone}`;
   };
 
-  // Marcar como lido ao selecionar o chat
   useEffect(() => {
     if (selectedChat) {
       const updated = messages.map(m => m.from === selectedChat ? { ...m, unread: false } : m);
@@ -296,7 +295,6 @@ const Inbox: React.FC = () => {
           <span className="text-[10px] text-slate-400 font-mono hidden lg:inline">| {debugLog}</span>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => fetchMessages(true, true)} className="text-[9px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 px-3 py-1 rounded hover:bg-amber-500 hover:text-white uppercase transition-all">Sincronizar Histórico</button>
           <button onClick={() => fetchMessages(true)} className="text-[9px] font-bold bg-white/10 text-white px-3 py-1 rounded hover:bg-white/20 uppercase">Sync Agora</button>
         </div>
       </div>
