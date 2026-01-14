@@ -1,7 +1,8 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// Initialize with the API key from environment variable as required by guidelines
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const generateMessageContent = async (prompt: string, tone: string): Promise<string> => {
   try {

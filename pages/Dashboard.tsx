@@ -79,4 +79,41 @@ const Dashboard: React.FC = () => {
                <div className="absolute inset-0 flex items-end px-4 pb-4 gap-2">
                   {/* Gráfico de barras simples simulado */}
                   {[40, 70, 55, 90, 65, 85, 100].map((h, i) => (
-                    <div key={i} className="flex-1 bg-
+                    <div key={i} className="flex-1 bg-emerald-400/20 rounded-t-sm" style={{ height: `${h}%` }}></div>
+                  ))}
+               </div>
+            ) : (
+               <p className="text-slate-400 italic text-sm">Sem dados suficientes para o gráfico.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+          <h3 className="font-bold text-slate-800 mb-6">Atividade Recente</h3>
+          <div className="space-y-4">
+            {stats.recentActivity.length === 0 ? (
+              <p className="text-center text-slate-400 text-sm italic py-10">Nenhuma atividade recente.</p>
+            ) : (
+              stats.recentActivity.map((m, i) => (
+                <div key={i} className="flex gap-3 items-start">
+                  <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500">
+                    {m.fromName ? m.fromName.charAt(0) : '+'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-slate-700 truncate">{m.fromName || `+${m.from}`}</p>
+                    <p className="text-[10px] text-slate-500 truncate">{m.text}</p>
+                  </div>
+                  <span className="text-[8px] text-slate-400 font-bold uppercase whitespace-nowrap">
+                    {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Dashboard;
