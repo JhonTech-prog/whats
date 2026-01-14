@@ -18,6 +18,13 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const messages = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
     const count = messages.filter((m: any) => m.unread).length;
     setUnreadCount(count);
+    
+    // Sinalizar no Título da Aba
+    if (count > 0) {
+      document.title = `(${count}) WhatsJhonTechAI`;
+    } else {
+      document.title = `WhatsJhonTechAI`;
+    }
   };
 
   useEffect(() => {
