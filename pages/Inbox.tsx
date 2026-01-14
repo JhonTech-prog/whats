@@ -17,7 +17,17 @@ const Inbox: React.FC = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Scroll automático para a última mensagem
+  // Helper para normalizar datas de diferentes fontes (ISO, Unix Sec, Unix Ms)
+  const normalizeTimestamp = (ts: any): number => {
+    if (!ts) return Date.now();
+    if (typeof ts === 'number') {
+      // Se for Unix em segundos (10 dígitos), converte para ms
+      return ts < 10000000000 ? ts * 1000 : ts;
+    }
+    const parsed = new Date(ts).getTime();
+    return isNaN(parsed) ? Date.now() : parsed;
+  };
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -39,11 +49,9 @@ const Inbox: React.FC = () => {
     const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
     const index = contacts.findIndex(c => c.phone === phone);
     
-    const hasRealName = profileName && profileName.trim() !== "";
-    const nameFromProfile = hasRealName ? profileName!.trim() : null;
-    const finalName = nameFromProfile ? `Cliente ${nameFromProfile}` : `Cliente ${phone.slice(-4)}`;
-
     if (index === -1) {
+      const nameFromProfile = profileName && profileName.trim() !== "" ? profileName.trim() : null;
+      const finalName = nameFromProfile ? `Cliente ${nameFromProfile}` : `Cliente ${phone.slice(-4)}`;
       const newContact: Contact = {
         id: crypto.randomUUID(),
         name: finalName,
@@ -53,61 +61,7 @@ const Inbox: React.FC = () => {
       const updated = [newContact, ...contacts];
       localStorage.setItem('wb_contacts', JSON.stringify(updated));
       setSavedContacts(updated);
-      setDebugLog(`Novo lead: ${finalName}`);
       window.dispatchEvent(new Event('storage'));
-    }
-  };
-
-  const handleAutomation = async (newMsg: IncomingMessage) => {
-    const processedIds = JSON.parse(localStorage.getItem('wb_processed_ids') || '[]');
-    if (processedIds.includes(newMsg.id)) return;
-
-    if (!newMsg.isMe) {
-      autoSaveContact(newMsg.from, newMsg.fromName);
-    }
-
-    const autoSettingsRaw = localStorage.getItem('wb_automation_settings');
-    if (!autoSettingsRaw) return;
-    const settings: AutomationSettings = JSON.parse(autoSettingsRaw);
-    if (!settings.enabled) return;
-
-    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
-    if (!config.accessToken || !config.phoneId) return;
-
-    let responseToSend = "";
-    if (settings.keywords.enabled && newMsg.type === 'text') {
-      const cleanText = newMsg.text.toLowerCase().trim();
-      const rule = settings.keywords.rules.find(r => 
-        r.trigger && cleanText.includes(r.trigger.toLowerCase().trim())
-      );
-      if (rule) responseToSend = rule.response;
-    }
-
-    if (responseToSend) {
-      processedIds.push(newMsg.id);
-      localStorage.setItem('wb_processed_ids', JSON.stringify(processedIds.slice(-200)));
-
-      const result = await sendWhatsAppMessage(newMsg.from, responseToSend, {
-        accessToken: config.accessToken,
-        phoneId: config.phoneId
-      });
-
-      if (result.success) {
-        const myMessage: IncomingMessage = {
-          id: `auto-${Date.now()}-${Math.random()}`,
-          from: newMsg.from,
-          text: responseToSend,
-          timestamp: new Date().toISOString(),
-          unread: false,
-          isMe: true,
-          type: 'text'
-        };
-        setMessages(prev => {
-          const updated = [...prev, myMessage].sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-          localStorage.setItem('wb_incoming', JSON.stringify(updated));
-          return updated;
-        });
-      }
     }
   };
 
@@ -125,23 +79,19 @@ const Inbox: React.FC = () => {
 
       if (Array.isArray(rawData)) {
         const formattedMessages: IncomingMessage[] = rawData.map((m: any) => {
-          const stableId = m.id || `${m.from}-${m.timestamp}`;
+          const timestampMs = normalizeTimestamp(m.timestamp);
+          const stableId = m.id || `msg-${m.from}-${timestampMs}`;
+          
           let rawText = m.text || m.texto || m.body || '';
           let detectedType: MessageType = m.type || 'text';
           let mediaUrl = m.mediaUrl || m.image_url || m.audio_url || m.url;
           let finalText = rawText;
 
-          const isBase64Image = typeof rawText === 'string' && rawText.startsWith('data:image/');
-          const isBase64Audio = typeof rawText === 'string' && (rawText.startsWith('data:audio/') || rawText.startsWith('data:application/ogg') || rawText.startsWith('data:video/ogg'));
-
-          if (isBase64Image) {
-            detectedType = 'image';
-            mediaUrl = rawText;
-            finalText = '📷 Imagem';
-          } else if (isBase64Audio) {
-            detectedType = 'audio';
-            mediaUrl = rawText;
-            finalText = '🎤 Áudio';
+          // Detecção de Base64 embutido no texto
+          if (typeof rawText === 'string' && rawText.startsWith('data:image/')) {
+            detectedType = 'image'; mediaUrl = rawText; finalText = '📷 Imagem';
+          } else if (typeof rawText === 'string' && rawText.startsWith('data:audio/')) {
+            detectedType = 'audio'; mediaUrl = rawText; finalText = '🎤 Áudio';
           }
 
           return {
@@ -151,43 +101,40 @@ const Inbox: React.FC = () => {
             text: finalText,
             type: detectedType,
             mediaUrl: mediaUrl,
-            timestamp: m.timestamp || new Date().toISOString(),
+            timestamp: new Date(timestampMs).toISOString(),
             unread: m.unread !== undefined ? m.unread : true,
             isMe: m.isMe || false
           };
         });
 
-        // MERGE LOGIC: Junta o que já existe com o que veio do servidor sem duplicar
+        // LOGICA DE MERGE ROBUSTA: Nunca apaga o local
         const localSaved = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
-        
-        // Se for DeepSync, ainda mantemos o local, mas damos prioridade aos dados do servidor
         const messageMap = new Map();
         
-        // Adiciona locais primeiro
+        // 1. Carrega o que já temos no navegador
         localSaved.forEach((m: IncomingMessage) => messageMap.set(m.id, m));
-        // Sobrescreve/Adiciona novos do servidor
+        
+        // 2. Sobrescreve/Adiciona com o que veio do servidor
         formattedMessages.forEach((m: IncomingMessage) => messageMap.set(m.id, m));
 
         const merged = Array.from(messageMap.values()) as IncomingMessage[];
         
-        // ORDENAÇÃO CRONOLÓGICA GLOBAL
-        merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        // 3. ORDENAÇÃO CRONOLÓGICA INFALÍVEL (por Milissegundos)
+        merged.sort((a, b) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp));
 
         setMessages(merged);
         localStorage.setItem('wb_incoming', JSON.stringify(merged));
         
         if (isManual) {
-          setDebugLog(isDeepSync ? `Histórico Mesclado (${merged.length} total)` : 'Sincronizado.');
+          setDebugLog(`Sincronizado: ${merged.length} msgs total.`);
         }
 
-        // Rodar automação apenas para mensagens novas que não são minhas
-        if (!isDeepSync) {
-          const existingIds = new Set(localSaved.map((m: any) => m.id));
-          formattedMessages.filter(m => !existingIds.has(m.id) && !m.isMe).forEach(msg => handleAutomation(msg));
-        }
+        // Auto-save de novos contatos
+        formattedMessages.filter(m => !m.isMe).forEach(msg => autoSaveContact(msg.from, msg.fromName));
       }
     } catch (e) {
       setServerHealth('down');
+      setDebugLog('Erro ao conectar na ponte.');
     }
   };
 
@@ -200,10 +147,9 @@ const Inbox: React.FC = () => {
     const saved = localStorage.getItem('wb_incoming');
     if (saved) {
       const parsed = JSON.parse(saved);
-      parsed.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      parsed.sort((a: any, b: any) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp));
       setMessages(parsed);
     }
-    
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, []);
 
@@ -211,10 +157,7 @@ const Inbox: React.FC = () => {
     if (!selectedChat || !replyText.trim() || isSendingReply) return;
 
     const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
-    if (!config.accessToken || !config.phoneId) {
-      alert("Configure seu Token e Phone ID nos Ajustes.");
-      return;
-    }
+    if (!config.accessToken || !config.phoneId) return alert("Configure suas credenciais.");
 
     setIsSendingReply(true);
     const result = await sendWhatsAppMessage(selectedChat, replyText, {
@@ -225,7 +168,7 @@ const Inbox: React.FC = () => {
     if (result.success) {
       const myMessage: IncomingMessage = {
         id: `sent-${Date.now()}`,
-        from: selectedChat, // Associamos ao chat do cliente para agrupar corretamente
+        from: selectedChat,
         text: replyText,
         timestamp: new Date().toISOString(),
         unread: false,
@@ -234,7 +177,7 @@ const Inbox: React.FC = () => {
       };
 
       setMessages(prev => {
-        const updated = [...prev, myMessage].sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        const updated = [...prev, myMessage].sort((a,b) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp));
         localStorage.setItem('wb_incoming', JSON.stringify(updated));
         return updated;
       });
@@ -248,17 +191,12 @@ const Inbox: React.FC = () => {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedChat) return;
-
-    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
-    const fileType: MessageType = file.type.startsWith('image/') ? 'image' : file.type.startsWith('audio/') ? 'audio' : 'text';
-    
+    const fileType: MessageType = file.type.startsWith('image/') ? 'image' : 'audio';
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = (event) => {
       const base64 = event.target?.result as string;
-      setIsSendingReply(true);
-      
       const myMessage: IncomingMessage = {
-        id: `media-${Date.now()}`,
+        id: `media-local-${Date.now()}`,
         from: selectedChat,
         text: fileType === 'image' ? '📷 Imagem' : '🎤 Áudio',
         timestamp: new Date().toISOString(),
@@ -267,30 +205,27 @@ const Inbox: React.FC = () => {
         type: fileType,
         mediaUrl: base64
       };
-
       setMessages(prev => {
-        const updated = [...prev, myMessage].sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        const updated = [...prev, myMessage].sort((a,b) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp));
         localStorage.setItem('wb_incoming', JSON.stringify(updated));
         return updated;
       });
-      setIsSendingReply(false);
     };
     reader.readAsDataURL(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // AGRUPAMENTO INTELIGENTE: Garante que as minhas mensagens para o cliente X fiquem no grupo do cliente X
   const chatGroups = messages.reduce((acc: any, msg) => {
-    const chatId = msg.from; // Sempre agrupamos pelo número do cliente
+    const chatId = msg.from; 
     if (!acc[chatId]) acc[chatId] = [];
     acc[chatId].push(msg);
     return acc;
   }, {});
 
-  const sortedChatPartners = Object.keys(chatGroups).sort((a, b) => {
-    const lastA = chatGroups[a][chatGroups[a].length - 1].timestamp;
-    const lastB = chatGroups[b][chatGroups[b].length - 1].timestamp;
-    return new Date(lastB).getTime() - new Date(lastA).getTime();
+  const sortedPartners = Object.keys(chatGroups).sort((a, b) => {
+    const lastA = normalizeTimestamp(chatGroups[a][chatGroups[a].length - 1].timestamp);
+    const lastB = normalizeTimestamp(chatGroups[b][chatGroups[b].length - 1].timestamp);
+    return lastB - lastA;
   });
 
   const getContactName = (phone: string) => {
@@ -309,9 +244,7 @@ const Inbox: React.FC = () => {
       <div className="px-4 py-3 bg-slate-900 flex justify-between items-center border-b border-slate-800">
         <div className="flex items-center gap-3">
           <div className={`w-2 h-2 rounded-full ${serverHealth === 'up' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
-          <span className="text-[10px] text-white font-bold uppercase tracking-widest">
-            {serverHealth === 'up' ? 'Online' : 'Erro de Ponte'}
-          </span>
+          <span className="text-[10px] text-white font-bold uppercase tracking-widest">{serverHealth === 'up' ? 'Conectado' : 'Desconectado'}</span>
           <span className="text-[10px] text-slate-400 font-mono hidden lg:inline">| {debugLog}</span>
         </div>
         <div className="flex gap-2">
@@ -322,27 +255,21 @@ const Inbox: React.FC = () => {
 
       <div className="flex flex-1 overflow-hidden">
         <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-slate-100 flex-col bg-white overflow-y-auto`}>
-          {sortedChatPartners.length === 0 ? (
+          {sortedPartners.length === 0 ? (
             <div className="p-10 text-center opacity-20 mt-10">
               <p className="text-4xl mb-2">📩</p>
-              <p className="text-[10px] font-bold">Nenhum Chat</p>
+              <p className="text-[10px] font-bold uppercase">Sem conversas</p>
             </div>
           ) : (
-            sortedChatPartners.map(phone => {
-              const lastMsg = chatGroups[phone][chatGroups[phone].length - 1];
+            sortedPartners.map(phone => {
+              const partnerMsgs = chatGroups[phone];
+              const lastMsg = partnerMsgs[partnerMsgs.length - 1];
               return (
                 <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left hover:bg-slate-50 border-b border-slate-50 transition-colors ${selectedChat === phone ? 'bg-emerald-50/50 border-r-4 border-r-emerald-500' : ''}`}>
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-slate-100 text-slate-500`}>
-                    {getContactName(phone).charAt(0)}
-                  </div>
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-slate-100 text-slate-500">{getContactName(phone).charAt(0)}</div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-baseline">
-                      <p className="font-bold text-slate-800 text-sm truncate">{getContactName(phone)}</p>
-                    </div>
-                    <p className="text-xs text-slate-500 truncate">
-                      {lastMsg.isMe ? 'Você: ' : ''}
-                      {lastMsg.text}
-                    </p>
+                    <p className="font-bold text-slate-800 text-sm truncate">{getContactName(phone)}</p>
+                    <p className="text-xs text-slate-500 truncate">{lastMsg.isMe ? 'Você: ' : ''}{lastMsg.text}</p>
                   </div>
                 </button>
               );
@@ -367,22 +294,14 @@ const Inbox: React.FC = () => {
               <div ref={scrollRef} className="flex-1 p-4 md:p-6 overflow-y-auto space-y-4 flex flex-col">
                 {chatGroups[selectedChat].map((msg: any) => (
                   <div key={msg.id} className={`max-w-[85%] rounded-2xl shadow-sm border ${
-                    msg.isMe 
-                      ? 'bg-[#dcf8c6] border-[#c1e8a0] self-end rounded-tr-none text-slate-800' 
-                      : 'bg-white border-slate-200 self-start rounded-tl-none text-slate-700'
-                  } p-2`}>
-                    {msg.type === 'image' && msg.mediaUrl && (
-                      <img src={msg.mediaUrl} className="rounded-xl max-w-full h-auto mb-2 cursor-pointer" onClick={() => setPreviewImage(msg.mediaUrl)} />
-                    )}
-                    {msg.type === 'audio' && msg.mediaUrl && (
-                      <audio controls className="w-full h-10 mb-2 custom-player">
-                        <source src={msg.mediaUrl} type="audio/mpeg" />
-                      </audio>
-                    )}
-                    <p className="whitespace-pre-wrap text-sm px-1">{msg.text}</p>
-                    <div className="flex justify-end items-center gap-1 mt-1 opacity-60">
-                      <p className="text-[9px] font-medium">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
-                      {msg.isMe && <span className="text-[10px]">✓✓</span>}
+                    msg.isMe ? 'bg-[#dcf8c6] border-[#c1e8a0] self-end rounded-tr-none' : 'bg-white border-slate-200 self-start rounded-tl-none'
+                  } p-2 flex flex-col`}>
+                    {msg.type === 'image' && msg.mediaUrl && <img src={msg.mediaUrl} className="rounded-xl max-w-full mb-1 cursor-pointer" onClick={() => setPreviewImage(msg.mediaUrl)} />}
+                    {msg.type === 'audio' && msg.mediaUrl && <audio controls className="w-full h-8 mb-1 scale-90 origin-left"><source src={msg.mediaUrl} /></audio>}
+                    <p className="text-sm px-1 leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                    <div className="flex justify-end items-center gap-1 mt-0.5 opacity-40">
+                      <p className="text-[8px] font-bold">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                      {msg.isMe && <span className="text-[9px]">✓✓</span>}
                     </div>
                   </div>
                 ))}
@@ -391,21 +310,16 @@ const Inbox: React.FC = () => {
               <div className="p-4 bg-white border-t border-slate-200">
                 <div className="flex gap-2 items-end max-w-4xl mx-auto">
                   <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,audio/*" />
-                  <button onClick={() => fileInputRef.current?.click()} className="w-12 h-12 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200 transition-all shadow-sm">📎</button>
+                  <button onClick={() => fileInputRef.current?.click()} className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center hover:bg-slate-200">📎</button>
                   <textarea 
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendReply();
-                      }
-                    }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply(); } }}
                     placeholder="Sua mensagem..."
                     rows={1}
                     className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none max-h-32"
                   />
-                  <button onClick={handleSendReply} disabled={!replyText.trim() || isSendingReply} className="w-12 h-12 bg-emerald-500 text-white rounded-full flex items-center justify-center hover:bg-emerald-600 disabled:opacity-50 transition-all shadow-md active:scale-95">
+                  <button onClick={handleSendReply} disabled={!replyText.trim() || isSendingReply} className="w-12 h-12 bg-emerald-500 text-white rounded-full flex items-center justify-center hover:bg-emerald-600 transition-all active:scale-95">
                     {isSendingReply ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <span>✈️</span>}
                   </button>
                 </div>
@@ -413,16 +327,12 @@ const Inbox: React.FC = () => {
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-12 text-center">
-              <div className="w-20 h-20 bg-white/50 rounded-full flex items-center justify-center text-3xl mb-4 opacity-30 shadow-sm">📱</div>
-              <h3 className="font-bold text-slate-500 uppercase tracking-widest text-xs">Atendimento WhatsApp</h3>
-              <p className="text-[10px] mt-2">Escolha uma conversa lateral para começar.</p>
+              <div className="w-20 h-20 bg-white/50 rounded-full flex items-center justify-center text-3xl mb-4 opacity-30">📱</div>
+              <h3 className="font-bold text-slate-500 uppercase tracking-widest text-xs">Selecione um Chat</h3>
             </div>
           )}
         </div>
       </div>
-      <style>{`
-        .custom-player::-webkit-media-controls-panel { background-color: #f8fafc; }
-      `}</style>
     </div>
   );
 };
