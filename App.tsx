@@ -100,6 +100,7 @@ const Campaigns = () => {
 const Contacts = () => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -163,6 +164,13 @@ const Contacts = () => {
     if (!confirm(`Deseja remover ${selectedIds.size} contatos selecionados?`)) return;
     const remaining = contacts.filter(c => !selectedIds.has(c.id));
     saveContacts(remaining);
+  };
+
+  const handleEdit = (contact: Contact) => {
+    setEditingContact(contact);
+    setNewName(contact.name);
+    setNewPhone(contact.phone);
+    setIsModalOpen(true);
   };
 
   const handleImportFromPhone = async () => {
@@ -277,6 +285,13 @@ const Contacts = () => {
     }
   };
 
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingContact(null);
+    setNewName('');
+    setNewPhone('');
+  };
+
   return (
     <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
@@ -296,7 +311,7 @@ const Contacts = () => {
           <input type="file" ref={fileInputRef} onChange={handleFileImport} accept=".vcf,.csv" className="hidden" />
           <button onClick={() => fileInputRef.current?.click()} className="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-xs font-bold border border-slate-200">📁 Arquivo</button>
           <button onClick={handleImportFromPhone} className="bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-lg shadow-indigo-100">📱 Agenda</button>
-          <button onClick={() => setIsModalOpen(true)} className="bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-bold">+ Manual</button>
+          <button onClick={() => { setEditingContact(null); setIsModalOpen(true); }} className="bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-bold">+ Manual</button>
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -350,6 +365,9 @@ const Contacts = () => {
                     >
                       {testingId === c.id ? 'ENVIANDO...' : 'TESTAR'}
                     </button>
+                    <button onClick={() => handleEdit(c)} className="ml-2 p-1 text-slate-400 hover:text-emerald-500 transition-colors" title="Editar">
+                      ✏️
+                    </button>
                     <button onClick={() => saveContacts(contacts.filter(x => x.id !== c.id))} className="ml-2 text-slate-300 hover:text-rose-500">✕</button>
                   </td>
                 </tr>
@@ -360,20 +378,34 @@ const Contacts = () => {
       </div>
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-sm p-6 border border-slate-200 shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-800 mb-4">Adicionar Manual</h3>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 border border-slate-200 shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-800 mb-4">{editingContact ? 'Editar Contato' : 'Adicionar Manual'}</h3>
             <form onSubmit={(e) => {
               e.preventDefault();
               const formatted = formatPhoneForAPI(newPhone);
               if (formatted.length < 12) return alert("Número inválido.");
-              saveContacts([{ id: crypto.randomUUID(), name: newName, phone: formatted, group: 'Manual' }, ...contacts]);
-              setNewName(''); setNewPhone(''); setIsModalOpen(false);
+              
+              if (editingContact) {
+                const updatedList = contacts.map(c => 
+                  c.id === editingContact.id ? { ...c, name: newName, phone: formatted } : c
+                );
+                saveContacts(updatedList);
+              } else {
+                saveContacts([{ id: crypto.randomUUID(), name: newName, phone: formatted, group: 'Manual' }, ...contacts]);
+              }
+              closeModal();
             }} className="space-y-4">
-              <input required type="text" placeholder="Nome do Contato" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" />
-              <input required type="text" placeholder="DDD + Número (ex: 11999998888)" value={newPhone} onChange={e => setNewPhone(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" />
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-3 text-slate-500 font-bold">Cancelar</button>
-                <button type="submit" className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-100">Salvar</button>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Nome</label>
+                <input required type="text" placeholder="Nome do Contato" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">WhatsApp</label>
+                <input required type="text" placeholder="DDD + Número (ex: 11999998888)" value={newPhone} onChange={e => setNewPhone(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={closeModal} className="flex-1 py-3 text-slate-500 font-bold hover:bg-slate-50 rounded-xl transition-colors">Cancelar</button>
+                <button type="submit" className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-colors">Salvar</button>
               </div>
             </form>
           </div>
