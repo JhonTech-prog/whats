@@ -13,6 +13,7 @@ const NewCampaign: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [campaignName, setCampaignName] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<string>('all');
   const [isSending, setIsSending] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, success: 0, failed: 0 });
 
@@ -21,6 +22,12 @@ const NewCampaign: React.FC = () => {
     if (saved) setContacts(JSON.parse(saved));
   }, []);
 
+  const groups = Array.from(new Set(contacts.map(c => c.group)));
+
+  const filteredContacts = selectedGroup === 'all' 
+    ? contacts 
+    : contacts.filter(c => c.group === selectedGroup);
+
   const saveCampaignToHistory = (status: 'draft' | 'completed', sentCount: number) => {
     const campaigns: Campaign[] = JSON.parse(localStorage.getItem('wb_campaigns') || '[]');
     const newCampaign: Campaign = {
@@ -28,7 +35,7 @@ const NewCampaign: React.FC = () => {
       name: campaignName || `Campanha ${new Date().toLocaleDateString()}`,
       message: message,
       status: status,
-      totalContacts: contacts.length,
+      totalContacts: filteredContacts.length,
       sentCount: sentCount,
       createdAt: new Date().toISOString()
     };
@@ -66,22 +73,22 @@ const NewCampaign: React.FC = () => {
       return;
     }
 
-    if (contacts.length === 0) {
-      alert("Erro: Você não possui contatos cadastrados.");
+    if (filteredContacts.length === 0) {
+      alert("Erro: Não existem contatos no grupo selecionado.");
       return;
     }
 
-    if (!confirm(`Deseja iniciar o envio para ${contacts.length} contatos?`)) return;
+    if (!confirm(`Deseja iniciar o envio para ${filteredContacts.length} contatos do grupo "${selectedGroup === 'all' ? 'Todos' : selectedGroup}"?`)) return;
 
     setIsSending(true);
-    const total = contacts.length;
+    const total = filteredContacts.length;
     let successCount = 0;
     let failedCount = 0;
 
-    for (let i = 0; i < contacts.length; i++) {
+    for (let i = 0; i < filteredContacts.length; i++) {
       setProgress({ current: i + 1, total, success: successCount, failed: failedCount });
       
-      const result = await sendWhatsAppMessage(contacts[i].phone, message, {
+      const result = await sendWhatsAppMessage(filteredContacts[i].phone, message, {
         accessToken: config.accessToken,
         phoneId: config.phoneId
       });
@@ -90,10 +97,9 @@ const NewCampaign: React.FC = () => {
         successCount++;
       } else {
         failedCount++;
-        console.error(`Falha ao enviar para ${contacts[i].phone}:`, result.error);
+        console.error(`Falha ao enviar para ${filteredContacts[i].phone}:`, result.error);
       }
       
-      // Pequeno delay para não sobrecarregar
       await new Promise(r => setTimeout(r, 200));
     }
 
@@ -124,7 +130,7 @@ const NewCampaign: React.FC = () => {
             </div>
             <div>
               <h3 className="text-xl font-bold text-slate-800">Enviando Campanha...</h3>
-              <p className="text-slate-500 text-sm mt-1">Processando contato {progress.current} de {progress.total}</p>
+              <p className="text-slate-500 text-sm mt-1">Processando {progress.current} de {progress.total}</p>
             </div>
             <div className="flex gap-4 justify-center">
               <div className="text-center">
@@ -136,7 +142,6 @@ const NewCampaign: React.FC = () => {
                 <p className="text-lg font-bold text-rose-500">{progress.failed}</p>
               </div>
             </div>
-            <p className="text-xs text-slate-400 italic">Por favor, não feche esta aba durante o processo.</p>
           </div>
         </div>
       )}
@@ -155,10 +160,24 @@ const NewCampaign: React.FC = () => {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Público Alvo</label>
-            <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl flex justify-between items-center">
-              <span className="text-emerald-800 font-semibold text-sm">Todos os contatos importados</span>
-              <span className="bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-bold">{contacts.length} contatos</span>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Público Alvo (Filtrar por Grupo)</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <select 
+                value={selectedGroup}
+                onChange={(e) => setSelectedGroup(e.target.value)}
+                className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-600"
+              >
+                <option value="all">Todos os contatos ({contacts.length})</option>
+                {groups.map(group => (
+                  <option key={group} value={group}>
+                    Grupo: {group} ({contacts.filter(c => c.group === group).length})
+                  </option>
+                ))}
+              </select>
+              <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl flex justify-between items-center">
+                <span className="text-indigo-800 font-semibold text-xs">Total de envios:</span>
+                <span className="bg-indigo-500 text-white px-3 py-1 rounded-full text-xs font-bold">{filteredContacts.length} contatos</span>
+              </div>
             </div>
           </div>
         </div>
@@ -167,30 +186,20 @@ const NewCampaign: React.FC = () => {
       <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-slate-800">2. Criar com IA</h2>
-          <span className="text-xs bg-emerald-50 text-emerald-600 px-2 py-1 rounded-full font-bold uppercase tracking-wider">Powered by Gemini 3</span>
+          <span className="text-xs bg-emerald-50 text-emerald-600 px-2 py-1 rounded-full font-bold uppercase tracking-wider">Gemini 3 Flash</span>
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Qual a sua oferta ou aviso?</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Oferta ou aviso:</label>
               <textarea 
                 rows={4}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
-                placeholder="Ex: Quero oferecer 15% de desconto para quem comprar hoje usando o cupom WHATS15"
+                placeholder="Ex: Quero oferecer 15% de desconto para quem comprar hoje"
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Tom de Voz</label>
-              <div className="flex flex-wrap gap-2">
-                {['Profissional', 'Amigável', 'Urgente', 'Casual'].map((t) => (
-                  <button key={t} onClick={() => setTone(t)} className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${tone === t ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                    {t}
-                  </button>
-                ))}
-              </div>
             </div>
             <button onClick={handleGenerate} disabled={isGenerating || !prompt} className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold hover:bg-slate-900 disabled:opacity-50 transition-all">
               {isGenerating ? 'Gerando...' : '✨ Gerar Mensagem IA'}
@@ -198,30 +207,24 @@ const NewCampaign: React.FC = () => {
           </div>
 
           <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 relative">
-            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Preview no WhatsApp</h4>
+            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Preview da Mensagem</h4>
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               className="w-full bg-white p-4 rounded-xl shadow-sm border border-emerald-100 min-h-[160px] text-sm text-slate-700 outline-none resize-none"
-              placeholder="A mensagem gerada aparecerá aqui..."
             />
-            <div className="mt-4 p-3 bg-amber-50 border border-amber-100 rounded-lg">
-              <p className="text-[10px] text-amber-700 leading-tight">
-                <strong>Nota:</strong> Mensagens de texto livre via API Oficial só chegam se o cliente tiver falado com você nas últimas 24h. Caso contrário, use Templates aprovados na Meta.
-              </p>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="flex justify-end gap-4 pb-12">
-        <button onClick={handleSaveDraft} className="px-6 py-3 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl transition-all">Salvar como Rascunho</button>
+        <button onClick={handleSaveDraft} className="px-6 py-3 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl transition-all">Salvar Rascunho</button>
         <button 
           onClick={launchCampaign} 
           disabled={!message || isSending}
           className="px-10 py-3 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-200 hover:bg-emerald-600 transition-all disabled:opacity-50"
         >
-          Lançar Campanha Agora 🚀
+          Lançar para "{selectedGroup === 'all' ? 'Todos' : selectedGroup}" 🚀
         </button>
       </div>
     </div>

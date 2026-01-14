@@ -32,6 +32,10 @@ export interface IncomingMessage {
 
 export interface AutomationSettings {
   enabled: boolean;
+  leadGrouping: {
+    enabled: boolean;
+    groupName: string;
+  };
   welcomeMessage: {
     enabled: boolean;
     text: string;

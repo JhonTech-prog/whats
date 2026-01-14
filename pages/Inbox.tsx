@@ -17,11 +17,9 @@ const Inbox: React.FC = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Helper para normalizar datas de diferentes fontes (ISO, Unix Sec, Unix Ms)
   const normalizeTimestamp = (ts: any): number => {
     if (!ts) return Date.now();
     if (typeof ts === 'number') {
-      // Se for Unix em segundos (10 dígitos), converte para ms
       return ts < 10000000000 ? ts * 1000 : ts;
     }
     const parsed = new Date(ts).getTime();
@@ -50,13 +48,24 @@ const Inbox: React.FC = () => {
     const index = contacts.findIndex(c => c.phone === phone);
     
     if (index === -1) {
+      // Pega configurações de automação para ver o grupo de destino
+      const autoSettingsRaw = localStorage.getItem('wb_automation_settings');
+      let targetGroup = 'Capturado via Chat';
+      
+      if (autoSettingsRaw) {
+        const settings: AutomationSettings = JSON.parse(autoSettingsRaw);
+        if (settings.enabled && settings.leadGrouping?.enabled && settings.leadGrouping?.groupName) {
+          targetGroup = settings.leadGrouping.groupName;
+        }
+      }
+
       const nameFromProfile = profileName && profileName.trim() !== "" ? profileName.trim() : null;
       const finalName = nameFromProfile ? `Cliente ${nameFromProfile}` : `Cliente ${phone.slice(-4)}`;
       const newContact: Contact = {
         id: crypto.randomUUID(),
         name: finalName,
         phone: phone,
-        group: 'Capturado via Chat'
+        group: targetGroup
       };
       const updated = [newContact, ...contacts];
       localStorage.setItem('wb_contacts', JSON.stringify(updated));
@@ -87,7 +96,6 @@ const Inbox: React.FC = () => {
           let mediaUrl = m.mediaUrl || m.image_url || m.audio_url || m.url;
           let finalText = rawText;
 
-          // Detecção de Base64 embutido no texto
           if (typeof rawText === 'string' && rawText.startsWith('data:image/')) {
             detectedType = 'image'; mediaUrl = rawText; finalText = '📷 Imagem';
           } else if (typeof rawText === 'string' && rawText.startsWith('data:audio/')) {
@@ -107,34 +115,22 @@ const Inbox: React.FC = () => {
           };
         });
 
-        // LOGICA DE MERGE ROBUSTA: Nunca apaga o local
         const localSaved = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
         const messageMap = new Map();
-        
-        // 1. Carrega o que já temos no navegador
         localSaved.forEach((m: IncomingMessage) => messageMap.set(m.id, m));
-        
-        // 2. Sobrescreve/Adiciona com o que veio do servidor
         formattedMessages.forEach((m: IncomingMessage) => messageMap.set(m.id, m));
-
         const merged = Array.from(messageMap.values()) as IncomingMessage[];
-        
-        // 3. ORDENAÇÃO CRONOLÓGICA INFALÍVEL (por Milissegundos)
         merged.sort((a, b) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp));
 
         setMessages(merged);
         localStorage.setItem('wb_incoming', JSON.stringify(merged));
         
-        if (isManual) {
-          setDebugLog(`Sincronizado: ${merged.length} msgs total.`);
-        }
-
-        // Auto-save de novos contatos
+        if (isManual) setDebugLog(`Sincronizado: ${merged.length} msgs.`);
         formattedMessages.filter(m => !m.isMe).forEach(msg => autoSaveContact(msg.from, msg.fromName));
       }
     } catch (e) {
       setServerHealth('down');
-      setDebugLog('Erro ao conectar na ponte.');
+      setDebugLog('Erro na ponte.');
     }
   };
 
@@ -155,7 +151,6 @@ const Inbox: React.FC = () => {
 
   const handleSendReply = async () => {
     if (!selectedChat || !replyText.trim() || isSendingReply) return;
-
     const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
     if (!config.accessToken || !config.phoneId) return alert("Configure suas credenciais.");
 
@@ -175,7 +170,6 @@ const Inbox: React.FC = () => {
         isMe: true,
         type: 'text'
       };
-
       setMessages(prev => {
         const updated = [...prev, myMessage].sort((a,b) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp));
         localStorage.setItem('wb_incoming', JSON.stringify(updated));
