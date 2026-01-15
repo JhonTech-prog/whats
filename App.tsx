@@ -1,13 +1,23 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
-import Layout from './components/Layout';
-import Dashboard from './pages/Dashboard';
-import NewCampaign from './pages/NewCampaign';
-import Settings from './pages/Settings';
-import Inbox from './pages/Inbox';
-import Automation from './pages/Automation';
-import { Contact, Campaign } from './types';
+import Layout from './components/Layout.tsx';
+import Dashboard from './pages/Dashboard.tsx';
+import NewCampaign from './pages/NewCampaign.tsx';
+import Settings from './pages/Settings.tsx';
+import Inbox from './pages/Inbox.tsx';
+import Automation from './pages/Automation.tsx';
+import { Contact, Campaign } from './types.ts';
+
+// Helper universal para gerar IDs únicos sem depender exclusivamente do crypto.randomUUID (que falha em HTTP)
+export const safeGenerateId = () => {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+  } catch (e) {}
+  return Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+};
 
 // Componente para forçar o Inbox no Mobile
 const MobileRedirectHandler: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -33,8 +43,15 @@ const Campaigns = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('wb_campaigns');
-    if (saved) setCampaigns(JSON.parse(saved));
+    try {
+      const saved = localStorage.getItem('wb_campaigns');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setCampaigns(Array.isArray(parsed) ? parsed : []);
+      }
+    } catch (e) {
+      console.error("Erro ao ler campanhas do localStorage", e);
+    }
   }, []);
 
   const deleteCampaign = (id: string) => {
@@ -46,15 +63,15 @@ const Campaigns = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center px-4 md:px-0">
         <div>
           <h2 className="text-xl font-bold text-slate-800">Minhas Campanhas</h2>
           <p className="text-slate-500 text-sm">Gerencie seus disparos agendados e concluídos.</p>
         </div>
-        <Link to="/campaigns/new" className="bg-emerald-500 text-white px-6 py-2 rounded-xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-all">+ Nova Campanha</Link>
+        <Link to="/campaigns/new" className="bg-emerald-500 text-white px-6 py-2 rounded-xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-all">+ Nova</Link>
       </div>
 
-      <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+      <div className="bg-white p-4 md:p-8 rounded-2xl border border-slate-200 shadow-sm mx-4 md:mx-0">
         <div className="space-y-4">
           {campaigns.length === 0 ? (
             <div className="py-20 text-center text-slate-400 italic">
@@ -103,15 +120,19 @@ const Contacts = () => {
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const load = () => {
-      const saved = localStorage.getItem('wb_contacts');
-      if (saved) setContacts(JSON.parse(saved));
+      try {
+        const saved = localStorage.getItem('wb_contacts');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setContacts(Array.isArray(parsed) ? parsed : []);
+        }
+      } catch (e) {}
     };
     load();
     window.addEventListener('storage', load);
@@ -173,116 +194,53 @@ const Contacts = () => {
     setIsModalOpen(true);
   };
 
-  const handleImportFromPhone = async () => {
-    if (!('contacts' in navigator)) {
-      alert("API de agenda não suportada neste navegador.");
-      return;
-    }
-    try {
-      // @ts-ignore
-      const results = await navigator.contacts.select(['name', 'tel'], { multiple: true });
-      if (results?.length > 0) {
-        const imported = results.map((res: any) => ({
-            id: crypto.randomUUID(),
-            name: res.name?.[0] || 'Contato Importado',
-            phone: formatPhoneForAPI(res.tel?.[0] || ''),
-            group: 'Agenda Celular'
-          })).filter((c: Contact) => c.phone.length >= 12);
-        
-        saveContacts([...imported, ...contacts]);
-        alert(`Processado! Foram importados ${imported.length} contatos.`);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setIsProcessing(true);
     const reader = new FileReader();
     reader.onload = (event) => {
-      const content = event.target?.result as string;
-      const newContacts: Contact[] = [];
-      if (file.name.endsWith('.vcf')) {
-        const cards = content.split('BEGIN:VCARD');
-        cards.forEach(card => {
-          const nameMatch = card.match(/FN:(.*)/);
-          const telMatch = card.match(/TEL.*:(.*)/);
-          const rawName = nameMatch ? nameMatch[1].trim() : 'Contato VCF';
-          
-          if (telMatch) {
-            newContacts.push({
-              id: crypto.randomUUID(),
-              name: rawName,
-              phone: formatPhoneForAPI(telMatch[1]),
-              group: 'Arquivo VCF'
-            });
-          }
-        });
-      } else if (file.name.endsWith('.csv')) {
-        const lines = content.split('\n');
-        lines.forEach(line => {
-          const parts = line.split(/[,;]/);
-          if (parts.length >= 2) {
-            const rawName = parts[0].trim().replace(/"/g, '');
-            newContacts.push({
-              id: crypto.randomUUID(),
-              name: rawName,
-              phone: formatPhoneForAPI(parts[1]),
-              group: 'Arquivo CSV'
-            });
-          }
-        });
+      try {
+        const content = event.target?.result as string;
+        const newContacts: Contact[] = [];
+        if (file.name.endsWith('.vcf')) {
+          const cards = content.split('BEGIN:VCARD');
+          cards.forEach(card => {
+            const nameMatch = card.match(/FN:(.*)/);
+            const telMatch = card.match(/TEL.*:(.*)/);
+            const rawName = nameMatch ? nameMatch[1].trim() : 'Contato VCF';
+            if (telMatch) {
+              newContacts.push({
+                id: safeGenerateId(),
+                name: rawName,
+                phone: formatPhoneForAPI(telMatch[1]),
+                group: 'Arquivo VCF'
+              });
+            }
+          });
+        } else if (file.name.endsWith('.csv')) {
+          const lines = content.split('\n');
+          lines.forEach(line => {
+            const parts = line.split(/[,;]/);
+            if (parts.length >= 2) {
+              const rawName = parts[0].trim().replace(/"/g, '');
+              newContacts.push({
+                id: safeGenerateId(),
+                name: rawName,
+                phone: formatPhoneForAPI(parts[1]),
+                group: 'Arquivo CSV'
+              });
+            }
+          });
+        }
+        const validContacts = newContacts.filter(c => c.phone.length >= 10);
+        saveContacts([...validContacts, ...contacts]);
+        alert(`${validContacts.length} contatos importados.`);
+      } catch (err) {
+        alert("Erro ao processar arquivo.");
       }
-      const validContacts = newContacts.filter(c => c.phone.length >= 12);
-      saveContacts([...validContacts, ...contacts]);
-      setIsProcessing(false);
-      alert(`${validContacts.length} contatos importados.`);
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
     reader.readAsText(file);
-  };
-
-  const sendTest = async (contact: Contact) => {
-    const config = JSON.parse(localStorage.getItem('wb_sender_config') || '{}');
-    if (!config.accessToken || !config.phoneId) {
-      alert("⚠️ SIMULAÇÃO: Para enviar uma mensagem real, configure o 'Token' e o 'Phone ID' da Meta em Configurações.");
-      setTestingId(contact.id);
-      await new Promise(r => setTimeout(r, 1000));
-      setTestingId(null);
-      return;
-    }
-    setTestingId(contact.id);
-    try {
-      const response = await fetch(`https://graph.facebook.com/v21.0/${config.phoneId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${config.accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: contact.phone,
-          type: "template",
-          template: {
-            name: "hello_world",
-            language: { code: "en_US" }
-          }
-        })
-      });
-      if (response.ok) {
-        alert("✅ SUCESSO REAL!\nMensagem de teste enviada.");
-      } else {
-        const result = await response.json();
-        alert(`❌ ERRO NA API DA META:\n${result.error?.message || 'Erro desconhecido'}`);
-      }
-    } catch (error) {
-      alert("❌ ERRO DE CONEXÃO:\nNão foi possível alcançar os servidores da Meta.");
-    } finally {
-      setTestingId(null);
-    }
   };
 
   const closeModal = () => {
@@ -293,7 +251,7 @@ const Contacts = () => {
   };
 
   return (
-    <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+    <div className="bg-white p-4 md:p-8 rounded-2xl border border-slate-200 shadow-sm mx-4 md:mx-0">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-800">Minha Agenda</h2>
@@ -303,15 +261,14 @@ const Contacts = () => {
           {selectedIds.size > 0 && (
             <button 
               onClick={deleteSelected}
-              className="bg-rose-50 text-rose-600 px-4 py-2 rounded-lg text-xs font-bold border border-rose-100 hover:bg-rose-100 transition-all flex items-center gap-2"
+              className="bg-rose-50 text-rose-600 px-4 py-2 rounded-lg text-xs font-bold border border-rose-100"
             >
-              <span>🗑️</span> Remover Selecionados ({selectedIds.size})
+              Remover ({selectedIds.size})
             </button>
           )}
           <input type="file" ref={fileInputRef} onChange={handleFileImport} accept=".vcf,.csv" className="hidden" />
           <button onClick={() => fileInputRef.current?.click()} className="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-xs font-bold border border-slate-200">📁 Arquivo</button>
-          <button onClick={handleImportFromPhone} className="bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-lg shadow-indigo-100">📱 Agenda</button>
-          <button onClick={() => { setEditingContact(null); setIsModalOpen(true); }} className="bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-bold">+ Manual</button>
+          <button onClick={() => { setEditingContact(null); setIsModalOpen(true); }} className="bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-lg shadow-emerald-100">+ Manual</button>
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -321,27 +278,24 @@ const Contacts = () => {
               <th className="pb-4 w-10">
                 <input 
                   type="checkbox" 
-                  className="rounded border-slate-300 text-emerald-500 focus:ring-emerald-500" 
                   checked={contacts.length > 0 && selectedIds.size === contacts.length}
                   onChange={toggleSelectAll}
                 />
               </th>
               <th className="pb-4 text-xs font-bold text-slate-400 uppercase">Nome</th>
               <th className="pb-4 text-xs font-bold text-slate-400 uppercase">WhatsApp</th>
-              <th className="pb-4 text-xs font-bold text-slate-400 uppercase">Origem</th>
               <th className="pb-4 text-xs font-bold text-slate-400 uppercase text-right">Ação</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {contacts.length === 0 ? (
-              <tr><td colSpan={5} className="py-20 text-center text-slate-400 italic">Nenhum contato encontrado.</td></tr>
+              <tr><td colSpan={4} className="py-20 text-center text-slate-400 italic">Nenhum contato encontrado.</td></tr>
             ) : (
               contacts.map(c => (
                 <tr key={c.id} className={`hover:bg-slate-50/80 transition-colors ${selectedIds.has(c.id) ? 'bg-emerald-50/30' : ''}`}>
                   <td className="py-4">
                     <input 
                       type="checkbox" 
-                      className="rounded border-slate-300 text-emerald-500 focus:ring-emerald-500" 
                       checked={selectedIds.has(c.id)}
                       onChange={() => toggleSelect(c.id)}
                     />
@@ -350,24 +304,8 @@ const Contacts = () => {
                     <p className="text-sm font-semibold text-slate-700">{c.name}</p>
                   </td>
                   <td className="py-4 text-sm text-emerald-600 font-mono">+{c.phone}</td>
-                  <td className="py-4">
-                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${c.group.includes('Chat') ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 text-slate-500'}`}>
-                      {c.group}
-                    </span>
-                  </td>
                   <td className="py-4 text-right">
-                    <button 
-                      disabled={!!testingId} 
-                      onClick={() => sendTest(c)} 
-                      className={`text-[10px] px-3 py-1.5 rounded-md font-bold transition-all ${
-                        testingId === c.id ? 'bg-slate-100 text-slate-400' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
-                      }`}
-                    >
-                      {testingId === c.id ? 'ENVIANDO...' : 'TESTAR'}
-                    </button>
-                    <button onClick={() => handleEdit(c)} className="ml-2 p-1 text-slate-400 hover:text-emerald-500 transition-colors" title="Editar">
-                      ✏️
-                    </button>
+                    <button onClick={() => handleEdit(c)} className="p-1 text-slate-400 hover:text-emerald-500">✏️</button>
                     <button onClick={() => saveContacts(contacts.filter(x => x.id !== c.id))} className="ml-2 text-slate-300 hover:text-rose-500">✕</button>
                   </td>
                 </tr>
@@ -378,34 +316,24 @@ const Contacts = () => {
       </div>
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-6 border border-slate-200 shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-800 mb-4">{editingContact ? 'Editar Contato' : 'Adicionar Manual'}</h3>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <h3 className="text-lg font-bold mb-4">{editingContact ? 'Editar' : 'Novo'} Contato</h3>
             <form onSubmit={(e) => {
               e.preventDefault();
               const formatted = formatPhoneForAPI(newPhone);
-              if (formatted.length < 12) return alert("Número inválido.");
-              
+              if (formatted.length < 10) return alert("Número inválido.");
               if (editingContact) {
-                const updatedList = contacts.map(c => 
-                  c.id === editingContact.id ? { ...c, name: newName, phone: formatted } : c
-                );
-                saveContacts(updatedList);
+                saveContacts(contacts.map(c => c.id === editingContact.id ? { ...c, name: newName, phone: formatted } : c));
               } else {
-                saveContacts([{ id: crypto.randomUUID(), name: newName, phone: formatted, group: 'Manual' }, ...contacts]);
+                saveContacts([{ id: safeGenerateId(), name: newName, phone: formatted, group: 'Manual' }, ...contacts]);
               }
               closeModal();
             }} className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Nome</label>
-                <input required type="text" placeholder="Nome do Contato" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">WhatsApp</label>
-                <input required type="text" placeholder="DDD + Número (ex: 11999998888)" value={newPhone} onChange={e => setNewPhone(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" />
-              </div>
-              <div className="flex gap-2 pt-2">
-                <button type="button" onClick={closeModal} className="flex-1 py-3 text-slate-500 font-bold hover:bg-slate-50 rounded-xl transition-colors">Cancelar</button>
-                <button type="submit" className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-colors">Salvar</button>
+              <input required placeholder="Nome" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl" />
+              <input required placeholder="WhatsApp" value={newPhone} onChange={e => setNewPhone(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl" />
+              <div className="flex gap-2">
+                <button type="button" onClick={closeModal} className="flex-1 py-3 text-slate-500 font-bold">Cancelar</button>
+                <button type="submit" className="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-xl">Salvar</button>
               </div>
             </form>
           </div>
