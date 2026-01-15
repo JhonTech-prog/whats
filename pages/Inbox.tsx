@@ -16,7 +16,6 @@ const Inbox: React.FC = () => {
   const pollingRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const normalizeTimestamp = (ts: any): number => {
     if (!ts) return Date.now();
@@ -26,17 +25,6 @@ const Inbox: React.FC = () => {
     const parsed = new Date(ts).getTime();
     return isNaN(parsed) ? Date.now() : parsed;
   };
-
-  // Solicitar permissão de notificação e carregar áudio "Olha a mensagem"
-  useEffect(() => {
-    if ("Notification" in window) {
-      Notification.requestPermission();
-    }
-    // Inicializar áudio de notificação com o som "Olha a mensagem"
-    const audio = new Audio('https://www.myinstants.com/media/sounds/olha-a-mensagem-original.mp3');
-    audio.load();
-    audioRef.current = audio;
-  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -55,30 +43,12 @@ const Inbox: React.FC = () => {
     return () => window.removeEventListener('storage', loadContacts);
   }, []);
 
-  const triggerNotification = (msg: IncomingMessage) => {
-    // 1. Som "Olha a mensagem!"
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0; // Reinicia o áudio caso receba mensagens seguidas
-      audioRef.current.play().catch((e) => {
-        console.warn("Navegador bloqueou áudio automático. Interaja com a página uma vez para liberar.", e);
-      });
-    }
-
-    // 2. Notificação Nativa
-    if (Notification.permission === "granted" && !msg.isMe) {
-      const name = getContactName(msg.from);
-      new Notification(`Nova mensagem de ${name}`, {
-        body: msg.text,
-        icon: 'https://cdn-icons-png.flaticon.com/512/124/124034.png'
-      });
-    }
-  };
-
   const autoSaveContact = (phone: string, profileName?: string) => {
     const contacts: Contact[] = JSON.parse(localStorage.getItem('wb_contacts') || '[]');
     const index = contacts.findIndex(c => c.phone === phone);
     
     if (index === -1) {
+      // Pega configurações de automação para ver o grupo de destino
       const autoSettingsRaw = localStorage.getItem('wb_automation_settings');
       let targetGroup = 'Capturado via Chat';
       
@@ -117,10 +87,6 @@ const Inbox: React.FC = () => {
       setServerHealth('up');
 
       if (Array.isArray(rawData)) {
-        const localSavedRaw = localStorage.getItem('wb_incoming');
-        const localSaved: IncomingMessage[] = localSavedRaw ? JSON.parse(localSavedRaw) : [];
-        const existingIds = new Set(localSaved.map(m => m.id));
-
         const formattedMessages: IncomingMessage[] = rawData.map((m: any) => {
           const timestampMs = normalizeTimestamp(m.timestamp);
           const stableId = m.id || `msg-${m.from}-${timestampMs}`;
@@ -149,15 +115,7 @@ const Inbox: React.FC = () => {
           };
         });
 
-        // Detectar Mensagens NOVAS para Notificar
-        let hasNewMessages = false;
-        formattedMessages.forEach(msg => {
-          if (!existingIds.has(msg.id) && !msg.isMe) {
-            hasNewMessages = true;
-            triggerNotification(msg);
-          }
-        });
-
+        const localSaved = JSON.parse(localStorage.getItem('wb_incoming') || '[]');
         const messageMap = new Map();
         localSaved.forEach((m: IncomingMessage) => messageMap.set(m.id, m));
         formattedMessages.forEach((m: IncomingMessage) => messageMap.set(m.id, m));
@@ -168,8 +126,6 @@ const Inbox: React.FC = () => {
         localStorage.setItem('wb_incoming', JSON.stringify(merged));
         
         if (isManual) setDebugLog(`Sincronizado: ${merged.length} msgs.`);
-        if (hasNewMessages) window.dispatchEvent(new Event('storage')); // Atualiza badges no layout
-        
         formattedMessages.filter(m => !m.isMe).forEach(msg => autoSaveContact(msg.from, msg.fromName));
       }
     } catch (e) {
@@ -271,16 +227,6 @@ const Inbox: React.FC = () => {
     return contact ? contact.name : `+${phone}`;
   };
 
-  // Marcar como lido ao selecionar o chat
-  useEffect(() => {
-    if (selectedChat) {
-      const updated = messages.map(m => m.from === selectedChat ? { ...m, unread: false } : m);
-      setMessages(updated);
-      localStorage.setItem('wb_incoming', JSON.stringify(updated));
-      window.dispatchEvent(new Event('storage'));
-    }
-  }, [selectedChat]);
-
   return (
     <div className="bg-white rounded-none md:rounded-2xl border-0 md:border border-slate-200 shadow-sm overflow-hidden h-screen md:h-[calc(100vh-200px)] flex flex-col">
       {previewImage && (
@@ -312,23 +258,12 @@ const Inbox: React.FC = () => {
             sortedPartners.map(phone => {
               const partnerMsgs = chatGroups[phone];
               const lastMsg = partnerMsgs[partnerMsgs.length - 1];
-              const unreadCount = partnerMsgs.filter((m: any) => m.unread).length;
-
               return (
                 <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left hover:bg-slate-50 border-b border-slate-50 transition-colors ${selectedChat === phone ? 'bg-emerald-50/50 border-r-4 border-r-emerald-500' : ''}`}>
-                  <div className="relative">
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-slate-100 text-slate-500">{getContactName(phone).charAt(0)}</div>
-                    {unreadCount > 0 && (
-                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white text-[8px] rounded-full flex items-center justify-center font-bold ring-2 ring-white">
-                        {unreadCount}
-                      </span>
-                    )}
-                  </div>
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-slate-100 text-slate-500">{getContactName(phone).charAt(0)}</div>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm truncate ${unreadCount > 0 ? 'font-black text-slate-900' : 'font-bold text-slate-700'}`}>{getContactName(phone)}</p>
-                    <p className={`text-xs truncate ${unreadCount > 0 ? 'text-slate-800 font-medium' : 'text-slate-500'}`}>
-                      {lastMsg.isMe ? 'Você: ' : ''}{lastMsg.text}
-                    </p>
+                    <p className="font-bold text-slate-800 text-sm truncate">{getContactName(phone)}</p>
+                    <p className="text-xs text-slate-500 truncate">{lastMsg.isMe ? 'Você: ' : ''}{lastMsg.text}</p>
                   </div>
                 </button>
               );
