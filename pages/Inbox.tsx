@@ -94,6 +94,7 @@ const Inbox: React.FC = () => {
                   </button>
                 </div>
 
+    try {
       if (Array.isArray(rawData)) {
         const formattedMessages: IncomingMessage[] = rawData.map((m: any) => {
           // Compatibilidade máxima com diferentes formatos de backend
@@ -139,8 +140,7 @@ const Inbox: React.FC = () => {
         if (isManual) setDebugLog(`Sincronizado.`);
         formattedMessages.filter(m => !m.isMe).forEach(msg => autoSaveContact(msg.from, msg.fromName));
       }
-    }
-    catch (e) {
+    } catch (e) {
       setServerHealth('down');
       setDebugLog('Erro na ponte.');
     }
