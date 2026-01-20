@@ -201,7 +201,8 @@ const Inbox: React.FC = () => {
   };
 
   const chatGroups = messages.reduce((acc: any, msg) => {
-    const chatId = msg.from; 
+    // Normaliza o telefone para garantir que bate com o dos contatos
+    const chatId = String(msg.from).replace(/\D/g, '');
     if (!acc[chatId]) acc[chatId] = [];
     acc[chatId].push(msg);
     return acc;
