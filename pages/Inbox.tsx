@@ -26,71 +26,73 @@ const Inbox: React.FC = () => {
     const parsed = new Date(ts).getTime();
     return isNaN(parsed) ? Date.now() : parsed;
   };
+                <div className="flex items-center">
+                  <input
+                    type="file"
+                    accept="image/*,audio/*,video/*"
+                    style={{ display: 'none' }}
+                    ref={fileInputRef}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = async (ev) => {
+                        const result = ev.target?.result;
+                        if (!result || typeof result !== 'string') return;
+                        let type: MessageType = 'text';
+                        if (file.type.startsWith('image/')) type = 'image';
+                        else if (file.type.startsWith('audio/')) type = 'audio';
+                        else if (file.type.startsWith('video/')) type = 'video';
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [selectedChat, messages]);
+                        // Envio para o backend
+                        const configRaw = localStorage.getItem('wb_sender_config');
+                        const config = configRaw ? JSON.parse(configRaw) : {};
+                        if (!selectedChat || !config.accessToken || !config.phoneId) return alert("Configure suas credenciais.");
 
-  const loadContacts = () => {
-    try {
-      const saved = localStorage.getItem('wb_contacts');
-      if (saved) setSavedContacts(JSON.parse(saved));
-    } catch(e) {}
-  };
-
-  useEffect(() => {
-    loadContacts();
-    window.addEventListener('storage', loadContacts);
-    return () => window.removeEventListener('storage', loadContacts);
-  }, []);
-
-  const autoSaveContact = (phone: string, profileName?: string) => {
-    try {
-      const contactsRaw = localStorage.getItem('wb_contacts');
-      const contacts: Contact[] = contactsRaw ? JSON.parse(contactsRaw) : [];
-      const index = contacts.findIndex(c => c.phone === phone);
-      
-      if (index === -1) {
-        const autoSettingsRaw = localStorage.getItem('wb_automation_settings');
-        let targetGroup = 'Capturado via Chat';
-        
-        if (autoSettingsRaw) {
-          const settings: AutomationSettings = JSON.parse(autoSettingsRaw);
-          if (settings.enabled && settings.leadGrouping?.enabled && settings.leadGrouping?.groupName) {
-            targetGroup = settings.leadGrouping.groupName;
-          }
-        }
-
-        const nameFromProfile = profileName && profileName.trim() !== "" ? profileName.trim() : null;
-        const finalName = nameFromProfile ? `Cliente ${nameFromProfile}` : `Cliente ${phone.slice(-4)}`;
-        const newContact: Contact = {
-          id: safeGenerateId(),
-          name: finalName,
-          phone: phone,
-          group: targetGroup
-        };
-        const updated = [newContact, ...contacts];
-        localStorage.setItem('wb_contacts', JSON.stringify(updated));
-        setSavedContacts(updated);
-        window.dispatchEvent(new Event('storage'));
-      }
-    } catch(e) {}
-  };
-
-  const fetchMessages = async (isManual = false) => {
-    try {
-      const configRaw = localStorage.getItem('wb_sender_config');
-      const config = configRaw ? JSON.parse(configRaw) : {};
-      if (!config.bridgeUrl) return;
-
-      const dataUrl = config.bridgeUrl.endsWith('/messages') ? config.bridgeUrl : (config.bridgeUrl.endsWith('/') ? config.bridgeUrl + 'messages' : config.bridgeUrl + '/messages');
-
-      const response = await fetch(dataUrl);
-      if (!response.ok) throw new Error();
-      const rawData = await response.json();
-      setServerHealth('up');
+                        setIsSendingReply(true);
+                        let sendResult;
+                        if (type === 'image' || type === 'audio' || type === 'video') {
+                          sendResult = await sendWhatsAppMedia(selectedChat, result, type, {
+                            accessToken: config.accessToken,
+                            phoneId: config.phoneId
+                          });
+                        }
+                        setIsSendingReply(false);
+                        if (sendResult && sendResult.success) {
+                          const myMessage: IncomingMessage = {
+                            id: `sent-${Date.now()}`,
+                            from: selectedChat,
+                            text: type === 'image' || type === 'audio' || type === 'video' ? result : '',
+                            timestamp: new Date().toISOString(),
+                            unread: false,
+                            isMe: true,
+                            type,
+                            mediaUrl: result
+                          };
+                          setMessages(prev => {
+                            const updated = [...prev, myMessage].sort((a,b) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp));
+                            localStorage.setItem('wb_incoming', JSON.stringify(updated));
+                            return updated;
+                          });
+                          setReplyText('');
+                          if (fileInputRef.current) fileInputRef.current.value = '';
+                        } else {
+                          alert("Erro ao enviar mídia");
+                        }
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="w-10 h-10 bg-blue-500 text-white rounded-full flex items-center justify-center mr-2"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Anexar mídia"
+                    disabled={isSendingReply}
+                  >
+                    📎
+                  </button>
+                </div>
 
       if (Array.isArray(rawData)) {
         const formattedMessages: IncomingMessage[] = rawData.map((m: any) => {
