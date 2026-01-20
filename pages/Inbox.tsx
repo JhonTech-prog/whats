@@ -3,12 +3,15 @@ import { useNotificationOnNewMessage } from '../services/useNotificationOnNewMes
 import { IncomingMessage, Contact } from '../types.ts';
 import { sendWhatsAppMessage } from '../services/whatsappService.ts';
 
+
 const Inbox: React.FC = () => {
   const [messages, setMessages] = useState<IncomingMessage[]>([]);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [savedContacts, setSavedContacts] = useState<Contact[]>([]);
   const [serverHealth, setServerHealth] = useState<'up' | 'down' | 'unknown'>('unknown');
+  const [openedChats, setOpenedChats] = useState<{[phone: string]: boolean}>({});
+  const [respondedChats, setRespondedChats] = useState<{[phone: string]: boolean}>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useNotificationOnNewMessage(messages);
@@ -67,9 +70,14 @@ const Inbox: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+    // Marca chat como aberto ao selecionar
+    if (selectedChat) {
+      setOpenedChats(prev => ({ ...prev, [selectedChat]: true }));
     }
   }, [selectedChat, messages]);
 
@@ -94,6 +102,8 @@ const Inbox: React.FC = () => {
       };
       setMessages(prev => [...prev, myMessage]);
       setReplyText('');
+      // Marca chat como respondido
+      setRespondedChats(prev => ({ ...prev, [selectedChat]: true }));
     } else {
       alert("Erro ao enviar: " + result.error);
     }
@@ -134,8 +144,28 @@ const Inbox: React.FC = () => {
               const lastMsg = msgs.reduce((latest, msg) => {
                 return new Date(msg.timestamp) > new Date(latest.timestamp) ? msg : latest;
               }, msgs[0]);
-              // Verifica se há mensagens não lidas e se o chat não está selecionado
+              // Verifica se há mensagens não lidas recebidas
               const hasUnread = msgs.some(m => m.unread && !m.isMe);
+              // Se já abriu o chat pelo menos uma vez
+              const wasOpened = openedChats[phone];
+              // Se já respondeu pelo menos uma vez
+              const wasResponded = respondedChats[phone];
+              // Cor do contato:
+              // Vermelho: se tem mensagem não lida
+              // Azul: se já respondeu e não tem não lida
+              // Preto: se só abriu e não respondeu e não tem não lida
+              let nameColor = 'text-slate-800';
+              let msgColor = 'text-slate-500';
+              if (hasUnread) {
+                nameColor = 'text-red-600';
+                msgColor = 'text-red-500 font-bold';
+              } else if (wasResponded) {
+                nameColor = 'text-blue-600';
+                msgColor = 'text-blue-500 font-bold';
+              } else if (wasOpened) {
+                nameColor = 'text-black';
+                msgColor = 'text-black';
+              }
               return (
                 <button
                   key={phone}
@@ -144,8 +174,8 @@ const Inbox: React.FC = () => {
                 >
                   <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-slate-100 text-slate-500">{getContactName(phone).charAt(0)}</div>
                   <div className="flex-1 min-w-0">
-                    <p className={`font-bold text-sm truncate ${hasUnread && selectedChat !== phone ? 'text-red-600' : 'text-slate-800'}`}>{getContactName(phone)}</p>
-                    <p className={`text-xs truncate ${hasUnread && selectedChat !== phone ? 'text-red-500 font-bold' : 'text-slate-500'}`}>{lastMsg.text}</p>
+                    <p className={`font-bold text-sm truncate ${nameColor}`}>{getContactName(phone)}</p>
+                    <p className={`text-xs truncate ${msgColor}`}>{lastMsg.text}</p>
                   </div>
                 </button>
               );
