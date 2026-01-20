@@ -230,19 +230,23 @@ const Inbox: React.FC = () => {
 
       <div className="flex flex-1 overflow-hidden">
         <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-slate-100 flex-col bg-white overflow-y-auto`}>
-          {sortedPartners.map(phone => {
-            const partnerMsgs = chatGroups[phone];
-            const lastMsg = partnerMsgs[partnerMsgs.length - 1];
-            return (
-              <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left hover:bg-slate-50 border-b border-slate-50 ${selectedChat === phone ? 'bg-emerald-50' : ''}`}>
-                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-slate-100 text-slate-500">{getContactName(phone).charAt(0)}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-slate-800 text-sm truncate">{getContactName(phone)}</p>
-                  <p className="text-xs text-slate-500 truncate">{lastMsg.text}</p>
-                </div>
-              </button>
-            );
-          })}
+          {sortedPartners.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8">Nenhum chat encontrado</div>
+          ) : (
+            sortedPartners.map(phone => {
+              const partnerMsgs = chatGroups[phone];
+              const lastMsg = partnerMsgs[partnerMsgs.length - 1];
+              return (
+                <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left hover:bg-slate-50 border-b border-slate-50 ${selectedChat === phone ? 'bg-emerald-50' : ''}`}>
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-slate-100 text-slate-500">{getContactName(phone).charAt(0)}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-slate-800 text-sm truncate">{getContactName(phone)}</p>
+                    <p className="text-xs text-slate-500 truncate">{lastMsg.text}</p>
+                  </div>
+                </button>
+              );
+            })
+          )}
         </div>
 
         <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#efeae2] relative`}>
