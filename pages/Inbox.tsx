@@ -252,7 +252,11 @@ const Inbox: React.FC = () => {
               <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto space-y-4 flex flex-col">
                 {chatGroups[selectedChat].map((msg: any) => (
                   <div key={msg.id} className={`max-w-[85%] rounded-2xl p-2 ${msg.isMe ? 'bg-[#dcf8c6] self-end' : 'bg-white self-start'}`}>
-                    <p className="text-sm">{msg.text}</p>
+                    {msg.type === 'image' && msg.mediaUrl ? (
+                      <img src={msg.mediaUrl} alt="Imagem" className="max-w-[200px] max-h-[200px] rounded mb-1" />
+                    ) : (
+                      <p className="text-sm">{msg.text}</p>
+                    )}
                     <p className="text-[8px] opacity-40 text-right mt-1">{new Date(msg.timestamp).toLocaleTimeString()}</p>
                   </div>
                 ))}
