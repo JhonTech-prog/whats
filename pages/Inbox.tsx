@@ -215,7 +215,8 @@ const Inbox: React.FC = () => {
   });
 
   const getContactName = (phone: string) => {
-    const contact = savedContacts.find(c => c.phone === phone);
+    // Busca o contato ignorando possíveis diferenças de formato
+    const contact = savedContacts.find(c => String(c.phone).replace(/\D/g, '') === String(phone).replace(/\D/g, ''));
     return contact ? contact.name : `+${phone}`;
   };
 
