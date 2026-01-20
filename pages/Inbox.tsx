@@ -254,6 +254,11 @@ const Inbox: React.FC = () => {
                   <div key={msg.id} className={`max-w-[85%] rounded-2xl p-2 ${msg.isMe ? 'bg-[#dcf8c6] self-end' : 'bg-white self-start'}`}>
                     {msg.type === 'image' && msg.mediaUrl ? (
                       <img src={msg.mediaUrl} alt="Imagem" className="max-w-[200px] max-h-[200px] rounded mb-1" />
+                    ) : msg.type === 'audio' && msg.mediaUrl ? (
+                      <audio controls className="w-full max-w-[200px] mb-1">
+                        <source src={msg.mediaUrl} />
+                        Seu navegador não suporta áudio.
+                      </audio>
                     ) : (
                       <p className="text-sm">{msg.text}</p>
                     )}
