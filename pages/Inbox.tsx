@@ -232,18 +232,19 @@ const Inbox: React.FC = () => {
 
       <div className="flex flex-1 overflow-hidden">
         <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-slate-100 flex-col bg-white overflow-y-auto`}>
-          {sortedPartners.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8">Nenhum chat encontrado</div>
+          {savedContacts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8">Nenhum contato encontrado</div>
           ) : (
-            sortedPartners.map(phone => {
-              const partnerMsgs = chatGroups[phone];
-              const lastMsg = partnerMsgs[partnerMsgs.length - 1];
+            savedContacts.map(contact => {
+              const phone = String(contact.phone).replace(/\D/g, '');
+              const partnerMsgs = chatGroups[phone] || [];
+              const lastMsg = partnerMsgs.length > 0 ? partnerMsgs[partnerMsgs.length - 1] : null;
               return (
                 <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left hover:bg-slate-50 border-b border-slate-50 ${selectedChat === phone ? 'bg-emerald-50' : ''}`}>
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-slate-100 text-slate-500">{getContactName(phone).charAt(0)}</div>
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-slate-100 text-slate-500">{contact.name.charAt(0)}</div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold text-slate-800 text-sm truncate">{getContactName(phone)}</p>
-                    <p className="text-xs text-slate-500 truncate">{lastMsg.text}</p>
+                    <p className="font-bold text-slate-800 text-sm truncate">{contact.name}</p>
+                    <p className="text-xs text-slate-500 truncate">{lastMsg ? lastMsg.text : 'Nenhuma mensagem'}</p>
                   </div>
                 </button>
               );
@@ -259,21 +260,25 @@ const Inbox: React.FC = () => {
                 <p className="font-bold text-slate-800 text-sm">{getContactName(selectedChat)}</p>
               </div>
               <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto space-y-4 flex flex-col">
-                {chatGroups[selectedChat].map((msg: any) => (
-                  <div key={msg.id} className={`max-w-[85%] rounded-2xl p-2 ${msg.isMe ? 'bg-[#dcf8c6] self-end' : 'bg-white self-start'}`}>
-                    {msg.type === 'image' && msg.mediaUrl ? (
-                      <img src={msg.mediaUrl} alt="Imagem" className="max-w-[200px] max-h-[200px] rounded mb-1" />
-                    ) : msg.type === 'audio' && msg.mediaUrl ? (
-                      <audio controls className="w-full max-w-[200px] mb-1">
-                        <source src={msg.mediaUrl} />
-                        Seu navegador não suporta áudio.
-                      </audio>
-                    ) : (
-                      <p className="text-sm">{msg.text}</p>
-                    )}
-                    <p className="text-[8px] opacity-40 text-right mt-1">{new Date(msg.timestamp).toLocaleTimeString()}</p>
-                  </div>
-                ))}
+                {(chatGroups[selectedChat] || []).length === 0 ? (
+                  <div className="text-slate-400 text-center">Nenhuma mensagem para este contato</div>
+                ) : (
+                  chatGroups[selectedChat].map((msg: any) => (
+                    <div key={msg.id} className={`max-w-[85%] rounded-2xl p-2 ${msg.isMe ? 'bg-[#dcf8c6] self-end' : 'bg-white self-start'}`}>
+                      {msg.type === 'image' && msg.mediaUrl ? (
+                        <img src={msg.mediaUrl} alt="Imagem" className="max-w-[200px] max-h-[200px] rounded mb-1" />
+                      ) : msg.type === 'audio' && msg.mediaUrl ? (
+                        <audio controls className="w-full max-w-[200px] mb-1">
+                          <source src={msg.mediaUrl} />
+                          Seu navegador não suporta áudio.
+                        </audio>
+                      ) : (
+                        <p className="text-sm">{msg.text}</p>
+                      )}
+                      <p className="text-[8px] opacity-40 text-right mt-1">{new Date(msg.timestamp).toLocaleTimeString()}</p>
+                    </div>
+                  ))
+                )}
               </div>
               <div className="p-4 bg-white border-t flex gap-2">
                 <textarea 
