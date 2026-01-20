@@ -94,14 +94,16 @@ const Inbox: React.FC = () => {
 
       if (Array.isArray(rawData)) {
         const formattedMessages: IncomingMessage[] = rawData.map((m: any) => {
-          const timestampMs = normalizeTimestamp(m.timestamp);
-          const stableId = m.id || `msg-${m.from}-${timestampMs}`;
-          
+          // Compatibilidade máxima com diferentes formatos de backend
+          const timestampMs = normalizeTimestamp(m.timestamp || m.dataRecebimento);
+          const stableId = m.id || m._id || m.idExterno || `msg-${m.telefone || m.from}-${timestampMs}`;
+
           let rawText = m.text || m.texto || m.body || '';
-          let detectedType: MessageType = m.type || 'text';
+          let detectedType: MessageType = m.type || m.tipo || 'text';
           let mediaUrl = m.mediaUrl || m.image_url || m.audio_url || m.url;
           let finalText = rawText;
 
+          // Se for imagem ou áudio em base64, tratar corretamente
           if (typeof rawText === 'string' && rawText.startsWith('data:image/')) {
             detectedType = 'image'; mediaUrl = rawText; finalText = '📷 Imagem';
           } else if (typeof rawText === 'string' && rawText.startsWith('data:audio/')) {
@@ -110,8 +112,8 @@ const Inbox: React.FC = () => {
 
           return {
             id: stableId,
-            from: String(m.from || m.de || m.telefone || '').replace(/\D/g, ''),
-            fromName: m.push_name || m.pushName || m.nome || m.name || undefined,
+            from: String(m.from || m.telefone || m.de || '').replace(/\D/g, ''),
+            fromName: m.fromName || m.push_name || m.pushName || m.nome || m.name || undefined,
             text: finalText,
             type: detectedType,
             mediaUrl: mediaUrl,
