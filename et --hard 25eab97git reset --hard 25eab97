@@ -1,0 +1,74 @@
+[33m4c135ef[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m ajuste compatibilidade mensagens backend
+[33m167d864[m ajuste compatibilidade mensagens backend
+[33m0216782[m ajuste compatibilidade mensagens backend
+[33m0730cd5[m ajuste compatibilidade mensagens backend
+[33md486781[m ajuste compatibilidade mensagens backend
+[33mfe4fe4f[m ajuste compatibilidade mensagens backend
+[33m0eca8e2[m ajuste compatibilidade mensagens backend
+[33mf633903[m ajuste compatibilidade mensagens backend
+[33m25eab97[m ajuste compatibilidade mensagens backend
+[33m01518d4[m ajuste compatibilidade mensagens backend
+[33m9eb182f[m ajuste compatibilidade mensagens backend
+[33mda28746[m refactor: Improve error handling and data loading
+[33m0b68ebd[m feat: Streamline UI and remove unused audio
+[33m328235d[m refactor: Improve error handling and UI elements
+[33m3b5b20f[m refactor: Improve error handling and imports
+[33mce50346[m feat(dashboard, inbox): Add error handling and improve loading
+[33m66ce457[m feat: Enhance dashboard and Gemini service
+[33mcf6d234[m feat: Enhance dashboard and inbox with real-time data and audio
+[33m0d300c9[m feat: Add browser tab and desktop notifications
+[33m593936c[m feat(contacts): Add contact editing functionality
+[33m93ebc75[m feat(automation): Add lead grouping to automation settings
+[33m20c3a4e[m feat(inbox): Improve contact saving and timestamp normalization
+[33m115b845[m feat(inbox): Automate contact name update and optimize scrolling
+[33m7024ee3[m feat(inbox): Add image preview and base64 handling
+[33mee6d502[m feat: Allow sending media and microphone access
+[33m1a21e7c[m feat(inbox): Improve contact auto-save logic
+[33mb0fcdd0[m feat: Improve contact saving logic
+[33m0ffa556[m fix: Improve contact capture and storage logic
+[33m1990971[m refactor: Simplify Gemini service and update types
+[33m586e76e[m feat: Improve settings and inbox components
+[33m99d5e60[m feat(gemini): Add secure API key handling
+[33mcd23370[m feat: Improve inbox message handling and notifications
+[33mb0023a2[m fix(whatsapp): Validate and normalize phone numbers
+[33m9dca3cf[m feat: Simplify WhatsApp message sending and improve inbox status
+[33m4dd1a59[m feat: Improve phone number sanitization and UI status
+[33md28fb58[m fix(whatsapp): Improve message sending and polling
+[33m3769b60[m feat: Refactor settings and message sending
+[33m367d687[m fix(whatsapp): Saneia e valida número de destino e credenciais
+[33m5ea109c[m feat: Melhorar saneamento e limpeza de dados
+[33m2a41b77[m feat(inbox): Clean up cached messages and enable auto-scrolling
+[33mc72dd1c[m fix: Improve WhatsApp message sending and inbox syncing
+[33mef84336[m feat(inbox): Improve message parsing logic
+[33m8a470db[m feat(inbox): Add debug mode for message data
+[33m8dae9e5[m feat(inbox): Improve polling and add raw preview
+[33m7bedd8e[m feat(inbox): Add error logging to inbox component
+[33m56b474c[m feat(inbox): Simplify state and remove debug features
+[33m0d03154[m feat(inbox): Add debug info and improve server status
+[33md5c968e[m fix: Improve Gemini API key handling and Inbox UI state
+[33md4aae57[m fix(inbox): Display server count and online status
+[33m050e443[m feat: Improve phone number cleaning and inbox status
+[33m54df8bd[m feat: Improve WhatsApp message sending and inbox UI
+[33mf75d4c8[m fix: Improve message sending and inbox fetching
+[33mbd3ab3b[m fix(whatsapp): Sanitize 'to' number and handle empty messages
+[33md3dd9d3[m fix: Improve WhatsApp API integration and inbox UI
+[33m94eb235[m fix(inbox): Remove unused media type state
+[33m01fd675[m feat(inbox): Simplify API log state
+[33m5a0ea4a[m feat: Improve inbox message fetching and display
+[33mb1c6a19[m feat(inbox): Optimize message polling and formatting
+[33m8aa191a[m feat: Refactor inbox connection status and API logging
+[33md8e51ef[m feat: Improve connection status display
+[33m2d1f569[m feat(inbox): Improve server health status display
+[33ma53adaf[m fix(inbox): Improve audio error handling and cleanup debug log
+[33m9885a68[m feat(inbox): Add notification sound for new messages
+[33m1680d98[m feat: Add support for sending media messages
+[33m4f38bf3[m feat(campaigns): Add template message support
+[33ma083df4[m feat: Improve mobile responsiveness and navigation
+[33mce73ba9[m feat: Add contact selection for bulk actions
+[33maa90d36[m feat(contacts): Filter and format imported phone contacts
+[33meae98f2[m refactor: Remove redundant '.tsx' extensions
+[33mc52c27e[m fix: Clarify Meta webhook testing instructions
+[33mf028f40[m fix: Escape HTML entities in settings instructions
+[33m2ba65c0[m feat: Filter lead capture by "cliente" profile name
+[33mbd60dad[m feat: Initialize WhatsJhonTechAI project structure
+[33mff86f4d[m Initial commit
