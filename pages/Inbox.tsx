@@ -25,7 +25,7 @@ const Inbox: React.FC = () => {
     }
     const parsed = new Date(ts).getTime();
     return isNaN(parsed) ? Date.now() : parsed;
-  };
+  // ...existing code...
                 <div className="flex items-center">
                   <input
                     type="file"
