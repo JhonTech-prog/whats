@@ -130,13 +130,22 @@ const Inbox: React.FC = () => {
           ) : (
             chatPhones.map(phone => {
               const msgs = chatGroups[phone];
-              const lastMsg = msgs[msgs.length - 1];
+              // Achar a última mensagem mais recente pelo timestamp
+              const lastMsg = msgs.reduce((latest, msg) => {
+                return new Date(msg.timestamp) > new Date(latest.timestamp) ? msg : latest;
+              }, msgs[0]);
+              // Verifica se há mensagens não lidas e se o chat não está selecionado
+              const hasUnread = msgs.some(m => m.unread && !m.isMe);
               return (
-                <button key={phone} onClick={() => setSelectedChat(phone)} className={`w-full p-4 flex gap-3 text-left hover:bg-slate-50 border-b border-slate-50 ${selectedChat === phone ? 'bg-emerald-50' : ''}`}>
+                <button
+                  key={phone}
+                  onClick={() => setSelectedChat(phone)}
+                  className={`w-full p-4 flex gap-3 text-left hover:bg-slate-50 border-b border-slate-50 ${selectedChat === phone ? 'bg-emerald-50' : ''}`}
+                >
                   <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-slate-100 text-slate-500">{getContactName(phone).charAt(0)}</div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold text-slate-800 text-sm truncate">{getContactName(phone)}</p>
-                    <p className="text-xs text-slate-500 truncate">{lastMsg.text}</p>
+                    <p className={`font-bold text-sm truncate ${hasUnread && selectedChat !== phone ? 'text-red-600' : 'text-slate-800'}`}>{getContactName(phone)}</p>
+                    <p className={`text-xs truncate ${hasUnread && selectedChat !== phone ? 'text-red-500 font-bold' : 'text-slate-500'}`}>{lastMsg.text}</p>
                   </div>
                 </button>
               );
