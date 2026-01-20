@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNotificationOnNewMessage } from '../services/useNotificationOnNewMessage';
 import { IncomingMessage, Contact } from '../types.ts';
 import { sendWhatsAppMessage } from '../services/whatsappService.ts';
 
@@ -9,6 +10,8 @@ const Inbox: React.FC = () => {
   const [savedContacts, setSavedContacts] = useState<Contact[]>([]);
   const [serverHealth, setServerHealth] = useState<'up' | 'down' | 'unknown'>('unknown');
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useNotificationOnNewMessage(messages);
 
   useEffect(() => {
     // Carrega contatos salvos
@@ -148,7 +151,7 @@ const Inbox: React.FC = () => {
                 <p className="font-bold text-slate-800 text-sm">{getContactName(selectedChat)}</p>
               </div>
               <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto space-y-4 flex flex-col">
-                {(chatGroups[selectedChat] || []).map((msg: any) => (
+                {(chatGroups[selectedChat] || []).slice().reverse().map((msg: any) => (
                   <div key={msg.id} className={`max-w-[85%] rounded-2xl p-2 ${msg.isMe ? 'bg-[#dcf8c6] self-end' : 'bg-white self-start'}`}>
                     {msg.type === 'image' && msg.mediaUrl ? (
                       <img src={msg.mediaUrl} alt="Imagem" className="max-w-[200px] max-h-[200px] rounded mb-1" />
