@@ -139,7 +139,8 @@ const Inbox: React.FC = () => {
         if (isManual) setDebugLog(`Sincronizado.`);
         formattedMessages.filter(m => !m.isMe).forEach(msg => autoSaveContact(msg.from, msg.fromName));
       }
-    } catch (e) {
+    }
+    catch (e) {
       setServerHealth('down');
       setDebugLog('Erro na ponte.');
     }
