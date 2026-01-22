@@ -8,35 +8,26 @@ export const sendWhatsAppMessage = async (
   to: string,
   text: string,
   config: MetaConfig
-): Promise<{ success: boolean; error?: string }> => {
+): Promise<{ success: boolean; error?: string; messageId?: string }> => {
   try {
-    const response = await fetch(`https://graph.facebook.com/v21.0/${config.phoneId}/messages`, {
+    const response = await fetch('https://whatsapp-nrx3.onrender.com/send-message', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${config.accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: to,
-        type: "text",
-        text: { body: text }
+        to,
+        text
       })
     });
-
     const data = await response.json();
-
-    if (response.ok) {
-      return { success: true };
+    if (data.success) {
+      return { success: true, messageId: data.messageId };
     } else {
-      return { 
-        success: false, 
-        error: data.error?.message || 'Erro desconhecido na API da Meta' 
-      };
+      return { success: false, error: data.error || 'Erro desconhecido no backend' };
     }
   } catch (err) {
-    return { success: false, error: 'Erro de conexão com os servidores da Meta' };
+    return { success: false, error: 'Erro de conexão com o backend' };
   }
 };
 

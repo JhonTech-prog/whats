@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import AuthModal from './components/AuthModal';
 import { HashRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import Layout from './components/Layout.tsx';
 import Dashboard from './pages/Dashboard.tsx';
@@ -343,23 +344,50 @@ const Contacts = () => {
   );
 };
 
+
 const App: React.FC = () => {
+  const [auth, setAuth] = useState<{
+    phoneId: string;
+    accessToken: string;
+    apiUrl: string;
+  } | null>(null);
+
+  useEffect(() => {
+    // Tenta restaurar do localStorage
+    const saved = localStorage.getItem('wjtauth');
+    if (saved) {
+      try {
+        setAuth(JSON.parse(saved));
+      } catch {}
+    }
+  }, []);
+
+  const handleAuth = (data: { phoneId: string; accessToken: string; apiUrl: string }) => {
+    setAuth(data);
+    localStorage.setItem('wjtauth', JSON.stringify(data));
+  };
+
   return (
-    <HashRouter>
-      <MobileRedirectHandler>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/inbox" element={<Inbox />} />
-            <Route path="/automation" element={<Automation />} />
-            <Route path="/campaigns" element={<Campaigns />} />
-            <Route path="/campaigns/new" element={<NewCampaign />} />
-            <Route path="/contacts" element={<Contacts />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </Layout>
-      </MobileRedirectHandler>
-    </HashRouter>
+    <>
+      <AuthModal isOpen={!auth} onSubmit={handleAuth} />
+      {auth && (
+        <HashRouter>
+          <MobileRedirectHandler>
+            <Layout>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/inbox" element={<Inbox auth={auth} />} />
+                <Route path="/automation" element={<Automation />} />
+                <Route path="/campaigns" element={<Campaigns />} />
+                <Route path="/campaigns/new" element={<NewCampaign />} />
+                <Route path="/contacts" element={<Contacts />} />
+                <Route path="/settings" element={<Settings />} />
+              </Routes>
+            </Layout>
+          </MobileRedirectHandler>
+        </HashRouter>
+      )}
+    </>
   );
 };
 

@@ -6,8 +6,9 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       server: {
-        port: 3000,
-        host: '0.0.0.0',
+        port: 5173, // Porta padrão do Vite
+        open: true, // Abre o navegador automaticamente
+        host: '0.0.0.0', // Permite acesso em rede local
       },
       plugins: [react()],
       define: {
